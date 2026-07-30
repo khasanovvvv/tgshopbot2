@@ -241,17 +241,34 @@ async def edit_item_menu(callback: CallbackQuery):
         return
     item_id = int(callback.data.split(":")[2])
     item = db.get_item(item_id)
+    top_status = "✅ Ha" if item["is_top"] else "❌ Yo'q"
     text = (
         f"📦 {item['name']}\n"
         f"💵 Narxi: {item['price']:,} so'm\n".replace(",", " ") +
-        f"ℹ️ Izoh: {item['info'] or '-'}"
+        f"ℹ️ Izoh: {item['info'] or '-'}\n"
+        f"🔥 Top taklif: {top_status}"
     )
+    top_button_text = "🔥 Top'dan olib tashlash" if item["is_top"] else "🔥 Top taklifga qo'shish"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 Narxni o'zgartirish", callback_data=f"admin:editprice:{item_id}")],
+        [InlineKeyboardButton(text=top_button_text, callback_data=f"admin:toggletop:{item_id}")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:cat:{item['category_id']}")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:toggletop:"))
+async def toggle_top_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    item_id = int(callback.data.split(":")[2])
+    new_state = db.toggle_item_top(item_id)
+    await callback.answer(
+        "🔥 Top taklifga qo'shildi ✅" if new_state else "Top taklifdan olib tashlandi",
+        show_alert=True
+    )
+    await edit_item_menu(callback)
 
 
 @router.callback_query(F.data.startswith("admin:delitem:"))
