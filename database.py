@@ -25,9 +25,15 @@ def init_db():
             name TEXT NOT NULL,
             price INTEGER NOT NULL,
             info TEXT DEFAULT '',
+            is_top INTEGER DEFAULT 0,
             FOREIGN KEY (category_id) REFERENCES categories(id)
         )
     """)
+    # eski bazalarda is_top ustuni bo'lmasligi mumkin - qo'shib qo'yamiz
+    try:
+        cur.execute("ALTER TABLE items ADD COLUMN is_top INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # ustun allaqachon mavjud
     cur.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -152,3 +158,21 @@ def delete_item(item_id: int):
     conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
+
+
+def get_top_items():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM items WHERE is_top = 1 ORDER BY id").fetchall()
+    conn.close()
+    return rows
+
+
+def toggle_item_top(item_id: int) -> bool:
+    """Xizmatning 'top' holatini teskarisiga o'zgartiradi. Yangi holatni qaytaradi."""
+    conn = get_conn()
+    row = conn.execute("SELECT is_top FROM items WHERE id = ?", (item_id,)).fetchone()
+    new_value = 0 if row["is_top"] else 1
+    conn.execute("UPDATE items SET is_top = ? WHERE id = ?", (new_value, item_id))
+    conn.commit()
+    conn.close()
+    return bool(new_value)
