@@ -32,6 +32,11 @@ class EditPrice(StatesGroup):
     new_price = State()
 
 
+class RenameCategory(StatesGroup):
+    category_id = State()
+    new_name = State()
+
+
 class EditSettings(StatesGroup):
     admin_username = State()
     channel_url = State()
@@ -135,6 +140,7 @@ async def manage_category(callback: CallbackQuery):
             InlineKeyboardButton(text=f"✏️ {it['name']}", callback_data=f"admin:item:{it['id']}"),
             InlineKeyboardButton(text="🗑", callback_data=f"admin:delitem:{it['id']}:{category_id}"),
         ])
+    buttons.append([InlineKeyboardButton(text="✏️ Nomini o'zgartirish", callback_data=f"admin:renamecat:{category_id}")])
     buttons.append([InlineKeyboardButton(text="🗑 Kategoriyani o'chirish", callback_data=f"admin:delcat:{category_id}")])
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:categories")])
 
@@ -150,6 +156,30 @@ async def delete_category_cb(callback: CallbackQuery):
     db.delete_category(category_id)
     await callback.answer("Kategoriya o'chirildi ✅", show_alert=True)
     await list_categories_admin(callback)
+
+
+@router.callback_query(F.data.startswith("admin:renamecat:"))
+async def rename_category_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    category_id = int(callback.data.split(":")[2])
+    await state.update_data(category_id=category_id)
+    await state.set_state(RenameCategory.new_name)
+    await callback.message.edit_text("Kategoriyaning yangi nomini yozing:")
+    await callback.answer()
+
+
+@router.message(RenameCategory.new_name)
+async def rename_category_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    db.rename_category(data["category_id"], message.text.strip())
+    await state.clear()
+    await message.answer(
+        f"✅ Kategoriya nomi «{message.text.strip()}» ga o'zgartirildi.",
+        reply_markup=admin_menu_kb()
+    )
 
 
 # ---------- XIZMAT QO'SHISH ----------
