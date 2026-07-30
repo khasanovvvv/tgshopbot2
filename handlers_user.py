@@ -16,15 +16,15 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     channel_url = db.get_setting("channel_url")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛍 Xizmatlar", callback_data="menu:services")],
-        [InlineKeyboardButton(text="👨‍💻 Admin bilan aloqa", callback_data="menu:contact")],
-        [InlineKeyboardButton(text="📢 Biz kanali", url=channel_url)],
+        [InlineKeyboardButton(text="👨‍💻 Admin bilan bog'lanish", callback_data="menu:contact")],
+        [InlineKeyboardButton(text="📢 Bizning kanal", url=channel_url)],
     ])
     return kb
 
 
 WELCOME_TEXT = (
     "👋 Assalomu alaykum!\n\n"
-    "Bizning botga xush kelibsiz. Bu yerda siz Telegram Premium va boshqa "
+    " @khasanv botiga xush kelibsiz. Bu yerda siz Telegram Premium va boshqa "
     "xizmatlarimizni buyurtma qilishingiz mumkin.\n\n"
     "Quyidagi menyudan kerakli bo'limni tanlang 👇"
 )
