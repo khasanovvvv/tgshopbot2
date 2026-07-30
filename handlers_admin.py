@@ -42,6 +42,11 @@ class EditSettings(StatesGroup):
     channel_url = State()
 
 
+class EditEmoji(StatesGroup):
+    key = State()
+    new_emoji = State()
+
+
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
