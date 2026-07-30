@@ -23,12 +23,11 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 
 WELCOME_TEXT = (
-    "👋 Assalomu alaykum!\n\n"
-    " @khasanv botiga xush kelibsiz. Bu yerda siz Telegram Premium va boshqa "
+    '<tg-emoji emoji-id="5472235990955334730"></tg-emoji> Assalomu alaykum!\n\n'
+    "@khasanv botiga xush kelibsiz. Bu yerda siz Telegram Premium va boshqa "
     "xizmatlarimizni buyurtma qilishingiz mumkin.\n\n"
     "Quyidagi menyudan kerakli bo'limni tanlang 👇"
 )
-
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
