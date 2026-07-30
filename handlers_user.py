@@ -23,11 +23,12 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 
 WELCOME_TEXT = (
-    '<tg-emoji emoji-id="5472235990955334730"></tg-emoji> Assalomu alaykum!\n\n'
-    "@khasanv botiga xush kelibsiz. Bu yerda siz Telegram Premium va boshqa "
+    "👋 Assalomu alaykum!\n\n"
+    " @khasanv botiga xush kelibsiz. Bu yerda siz Telegram Premium va boshqa "
     "xizmatlarimizni buyurtma qilishingiz mumkin.\n\n"
     "Quyidagi menyudan kerakli bo'limni tanlang 👇"
 )
+
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
@@ -44,7 +45,7 @@ async def back_to_main(callback: CallbackQuery):
 async def contact_admin(callback: CallbackQuery):
     admin_username = db.get_setting("admin_username")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}")],
+        [InlineKeyboardButton(text="✍️ Admin bilan aloqa", url=f"https://t.me/{admin_username.lstrip('@')}")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="menu:main")],
     ])
     await callback.message.edit_text(
@@ -144,7 +145,7 @@ async def make_order(callback: CallbackQuery, bot: Bot):
 
     username_part = f"@{user.username}" if user.username else "username yo'q"
     admin_text = (
-        "🆕 Yangi buyurtma!\n\n"
+        "🆕 Yangi buyurtma shep!\n\n"
         f"👤 Foydalanuvchi: {user.full_name} ({username_part})\n"
         f"🆔 ID: {user.id}\n\n"
         f"📦 Xizmat: {item['name']}\n"
