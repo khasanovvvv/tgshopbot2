@@ -7,6 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 import database as db
 from config import ADMIN_ID
+from handlers_user import tge
 
 router = Router()
 
@@ -63,6 +64,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories")],
         [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos")],
         [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin:broadcast")],
+        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin:stats")],
         [InlineKeyboardButton(text="🎨 Emoji sozlamalari", callback_data="admin:emojis")],
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="admin:settings")],
     ])
@@ -233,7 +235,7 @@ async def add_item_price(message: Message, state: FSMContext):
     await state.set_state(AddItem.info)
     await message.answer(
         "Qo'shimcha izoh kiriting (masalan: yetkazib berish shartlari).\n"
-        "Agar kerak bo'lmasa, «-» deb yozing."
+        f"Agar kerak bo'lmasa, «-» deb yozing. {tge('exclaim', '‼️')}"
     )
 
 
@@ -555,3 +557,25 @@ async def set_emoji_finish(message: Message, state: FSMContext):
     db.set_setting(data["key"], message.text.strip())
     await state.clear()
     await message.answer("✅ Emoji yangilandi.", reply_markup=admin_menu_kb())
+
+
+# ---------- STATISTIKA ----------
+@router.callback_query(F.data == "admin:stats")
+async def stats_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    user_count = db.get_user_count()
+    order_count = db.get_order_count()
+    total_revenue = db.get_total_revenue()
+
+    text = (
+        "📊 <b>Statistika</b>\n\n"
+        f"👥 Jami foydalanuvchilar: {user_count}\n"
+        f"🧾 Jami buyurtmalar: {order_count}\n"
+        f"💵 Jami tushum: {total_revenue:,} so'm".replace(",", " ")
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
