@@ -1,16 +1,29 @@
 # database.py
 # Endi ma'lumotlar Supabase (bepul, doimiy PostgreSQL) da saqlanadi.
 # Render qayta ishga tushsa ham, ma'lumotlar YO'QOLMAYDI.
+#
+# ULANISHLAR HOVUZI (connection pool): har safar yangi tarmoq ulanishi
+# o'rnatish o'rniga, bir nechta ulanish oldindan ochib qo'yiladi va qayta
+# ishlatiladi. Bu botni SEZILARLI tezlashtiradi (ayniqsa Supabase serveri
+# uzoqroq mintaqada bo'lsa).
 import os
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool as pg_pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+_pool = pg_pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+
 
 def get_conn():
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = _pool.getconn()
+    conn.cursor_factory = psycopg2.extras.RealDictCursor
     return conn
+
+
+def release(conn):
+    _pool.putconn(conn)
 
 
 def init_db():
@@ -89,7 +102,7 @@ def init_db():
 
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 # ---------- FOYDALANUVCHILAR (reklama uchun) ----------
@@ -99,7 +112,7 @@ def add_user(user_id: int):
     cur.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def get_all_user_ids():
@@ -108,7 +121,7 @@ def get_all_user_ids():
     cur.execute("SELECT user_id FROM users")
     rows = cur.fetchall()
     cur.close()
-    conn.close()
+    release(conn)
     return [row["user_id"] for row in rows]
 
 
@@ -118,7 +131,7 @@ def get_user_count() -> int:
     cur.execute("SELECT COUNT(*) AS c FROM users")
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row["c"]
 
 
@@ -132,7 +145,7 @@ def log_order(item_id: int, user_id: int, price: int, promo_code: str = None):
     )
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def get_order_count() -> int:
@@ -141,7 +154,7 @@ def get_order_count() -> int:
     cur.execute("SELECT COUNT(*) AS c FROM orders")
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row["c"]
 
 
@@ -151,7 +164,7 @@ def get_total_revenue() -> int:
     cur.execute("SELECT COALESCE(SUM(price), 0) AS s FROM orders")
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row["s"]
 
 
@@ -166,7 +179,7 @@ def add_promocode(code: str, discount: int):
     )
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def get_promocode(code: str):
@@ -175,7 +188,7 @@ def get_promocode(code: str):
     cur.execute("SELECT * FROM promocodes WHERE code = %s AND active = 1", (code.upper(),))
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row
 
 
@@ -185,7 +198,7 @@ def get_all_promocodes():
     cur.execute("SELECT * FROM promocodes ORDER BY code")
     rows = cur.fetchall()
     cur.close()
-    conn.close()
+    release(conn)
     return rows
 
 
@@ -195,7 +208,7 @@ def delete_promocode(code: str):
     cur.execute("DELETE FROM promocodes WHERE code = %s", (code.upper(),))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 # ---------- SETTINGS ----------
@@ -205,7 +218,7 @@ def get_setting(key: str) -> str:
     cur.execute("SELECT value FROM settings WHERE key = %s", (key,))
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row["value"] if row else ""
 
 
@@ -215,7 +228,7 @@ def set_setting(key: str, value: str):
     cur.execute("UPDATE settings SET value = %s WHERE key = %s", (value, key))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 # ---------- CATEGORIES ----------
@@ -226,7 +239,7 @@ def add_category(name: str) -> int:
     new_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
     return new_id
 
 
@@ -236,7 +249,7 @@ def get_categories():
     cur.execute("SELECT * FROM categories ORDER BY id")
     rows = cur.fetchall()
     cur.close()
-    conn.close()
+    release(conn)
     return rows
 
 
@@ -246,7 +259,7 @@ def get_category(category_id: int):
     cur.execute("SELECT * FROM categories WHERE id = %s", (category_id,))
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row
 
 
@@ -257,7 +270,7 @@ def delete_category(category_id: int):
     cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def rename_category(category_id: int, new_name: str):
@@ -266,7 +279,7 @@ def rename_category(category_id: int, new_name: str):
     cur.execute("UPDATE categories SET name = %s WHERE id = %s", (new_name, category_id))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 # ---------- ITEMS ----------
@@ -280,7 +293,7 @@ def add_item(category_id: int, name: str, price: int, info: str = "") -> int:
     new_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
     return new_id
 
 
@@ -290,7 +303,7 @@ def get_items_by_category(category_id: int):
     cur.execute("SELECT * FROM items WHERE category_id = %s ORDER BY id", (category_id,))
     rows = cur.fetchall()
     cur.close()
-    conn.close()
+    release(conn)
     return rows
 
 
@@ -300,7 +313,7 @@ def get_item(item_id: int):
     cur.execute("SELECT * FROM items WHERE id = %s", (item_id,))
     row = cur.fetchone()
     cur.close()
-    conn.close()
+    release(conn)
     return row
 
 
@@ -310,7 +323,7 @@ def update_item_price(item_id: int, new_price: int):
     cur.execute("UPDATE items SET price = %s WHERE id = %s", (new_price, item_id))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def update_item_info(item_id: int, new_info: str):
@@ -319,7 +332,7 @@ def update_item_info(item_id: int, new_info: str):
     cur.execute("UPDATE items SET info = %s WHERE id = %s", (new_info, item_id))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def update_item_name(item_id: int, new_name: str):
@@ -328,7 +341,7 @@ def update_item_name(item_id: int, new_name: str):
     cur.execute("UPDATE items SET name = %s WHERE id = %s", (new_name, item_id))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def delete_item(item_id: int):
@@ -337,7 +350,7 @@ def delete_item(item_id: int):
     cur.execute("DELETE FROM items WHERE id = %s", (item_id,))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
 
 
 def get_top_items():
@@ -346,7 +359,7 @@ def get_top_items():
     cur.execute("SELECT * FROM items WHERE is_top = 1 ORDER BY id")
     rows = cur.fetchall()
     cur.close()
-    conn.close()
+    release(conn)
     return rows
 
 
@@ -360,5 +373,5 @@ def toggle_item_top(item_id: int) -> bool:
     cur.execute("UPDATE items SET is_top = %s WHERE id = %s", (new_value, item_id))
     conn.commit()
     cur.close()
-    conn.close()
+    release(conn)
     return bool(new_value)
