@@ -1,5 +1,5 @@
 # handlers_admin.py
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -47,11 +47,23 @@ class EditEmoji(StatesGroup):
     new_emoji = State()
 
 
+class BroadcastState(StatesGroup):
+    waiting_content = State()
+
+
+class AddPromo(StatesGroup):
+    code = State()
+    discount = State()
+
+
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data="admin:add_cat")],
         [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories")],
+        [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos")],
+        [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin:broadcast")],
+        [InlineKeyboardButton(text="🎨 Emoji sozlamalari", callback_data="admin:emojis")],
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="admin:settings")],
     ])
 
@@ -364,3 +376,182 @@ async def set_channel_finish(message: Message, state: FSMContext):
     db.set_setting("channel_url", message.text.strip())
     await state.clear()
     await message.answer("✅ Kanal link yangilandi.", reply_markup=admin_menu_kb())
+
+
+# ---------- PROMOKODLAR ----------
+@router.callback_query(F.data == "admin:promos")
+async def promos_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    promos = db.get_all_promocodes()
+    text = "🎟 Promokodlar:\n\n"
+    if promos:
+        for p in promos:
+            text += f"• {p['code']} — {p['discount']:,} so'm chegirma\n".replace(",", " ")
+    else:
+        text += "(hozircha yo'q)"
+
+    buttons = [[InlineKeyboardButton(text="➕ Promokod qo'shish", callback_data="admin:addpromo")]]
+    for p in promos:
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {p['code']} o'chirish", callback_data=f"admin:delpromo:{p['code']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:addpromo")
+async def add_promo_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(AddPromo.code)
+    await callback.message.edit_text("Promokod matnini kiriting (masalan: SALOM):")
+    await callback.answer()
+
+
+@router.message(AddPromo.code)
+async def add_promo_code(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.update_data(code=message.text.strip())
+    await state.set_state(AddPromo.discount)
+    await message.answer("Chegirma summasini kiriting (so'mda, faqat raqam). Masalan: 5000")
+
+
+@router.message(AddPromo.discount)
+async def add_promo_discount(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    data = await state.get_data()
+    db.add_promocode(data["code"], int(message.text.strip()))
+    await state.clear()
+    await message.answer(
+        f"✅ «{data['code'].upper()}» promokodi qo'shildi — {int(message.text.strip()):,} so'm chegirma".replace(",", " "),
+        reply_markup=admin_menu_kb()
+    )
+
+
+@router.callback_query(F.data.startswith("admin:delpromo:"))
+async def delete_promo_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    code = callback.data.split(":", 2)[2]
+    db.delete_promocode(code)
+    await callback.answer("Promokod o'chirildi ✅", show_alert=True)
+    await promos_menu(callback)
+
+
+# ---------- REKLAMA YUBORISH ----------
+@router.callback_query(F.data == "admin:broadcast")
+async def broadcast_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    user_count = db.get_user_count()
+    await state.set_state(BroadcastState.waiting_content)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")]
+    ])
+    await callback.message.edit_text(
+        f"📢 Reklama xabarini yuboring (matn, rasm, video - har qanday turi bo'lishi mumkin).\n\n"
+        f"Hozircha botdan {user_count} kishi foydalangan.",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(BroadcastState.waiting_content)
+async def broadcast_received(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.update_data(chat_id=message.chat.id, message_id=message.message_id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↪️ Forward qilib yuborish", callback_data="admin:bcast_forward")],
+        [InlineKeyboardButton(text="📋 Nusxa sifatida (forwardsiz)", callback_data="admin:bcast_copy")],
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")],
+    ])
+    await message.answer("Qanday yuborilsin?", reply_markup=kb)
+
+
+@router.callback_query(F.data.in_(["admin:bcast_forward", "admin:bcast_copy"]))
+async def broadcast_send(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        return
+    data = await state.get_data()
+    chat_id, message_id = data["chat_id"], data["message_id"]
+    forward = callback.data == "admin:bcast_forward"
+    await state.clear()
+
+    await callback.message.edit_text("⏳ Yuborilmoqda, kuting...")
+    await callback.answer()
+
+    user_ids = db.get_all_user_ids()
+    success, failed = 0, 0
+    for uid in user_ids:
+        try:
+            if forward:
+                await bot.forward_message(chat_id=uid, from_chat_id=chat_id, message_id=message_id)
+            else:
+                await bot.copy_message(chat_id=uid, from_chat_id=chat_id, message_id=message_id)
+            success += 1
+        except Exception:
+            failed += 1
+
+    await callback.message.edit_text(
+        f"✅ Reklama yuborildi!\n\n"
+        f"Muvaffaqiyatli: {success}\n"
+        f"Yuborilmadi (bot bloklangan va h.k.): {failed}",
+        reply_markup=admin_menu_kb()
+    )
+
+
+# ---------- EMOJI SOZLAMALARI ----------
+EMOJI_LABELS = {
+    "emoji_services": "Xizmatlar tugmasi",
+    "emoji_contact": "Admin bilan aloqa tugmasi",
+    "emoji_channel": "Biz kanali tugmasi",
+    "emoji_top": "Top takliflar tugmasi",
+    "emoji_order": "Buyurtma berish tugmasi",
+    "emoji_back": "Orqaga tugmasi",
+}
+
+
+@router.callback_query(F.data == "admin:emojis")
+async def emoji_settings_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    text = "🎨 Tugma emojilari:\n\n"
+    buttons = []
+    for key, label in EMOJI_LABELS.items():
+        current = db.get_setting(key) or "-"
+        text += f"{current} — {label}\n"
+        buttons.append([InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"admin:setemoji:{key}")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:setemoji:"))
+async def set_emoji_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    key = callback.data.split(":", 2)[2]
+    await state.update_data(key=key)
+    await state.set_state(EditEmoji.new_emoji)
+    label = EMOJI_LABELS.get(key, key)
+    await callback.message.edit_text(f"«{label}» uchun yangi emojini yuboring (masalan: 🟢):")
+    await callback.answer()
+
+
+@router.message(EditEmoji.new_emoji)
+async def set_emoji_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    db.set_setting(data["key"], message.text.strip())
+    await state.clear()
+    await message.answer("✅ Emoji yangilandi.", reply_markup=admin_menu_kb())
