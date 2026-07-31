@@ -45,6 +45,90 @@ def init_db():
                 ("admin_username", "@your_admin"))
     cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 ("channel_url", "https://t.me/your_channel"))
+    # tugmalar oldidagi emojilar (admin panelidan o'zgartiriladi)
+    default_emojis = {
+        "emoji_services": "🛍",
+        "emoji_contact": "👨‍💻",
+        "emoji_channel": "📢",
+        "emoji_top": "🔥",
+        "emoji_order": "✅",
+        "emoji_back": "🔙",
+    }
+    for key, value in default_emojis.items():
+        cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+    # botdan foydalangan barcha odamlar (reklama yuborish uchun)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY
+        )
+    """)
+
+    # promokodlar
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS promocodes (
+            code TEXT PRIMARY KEY,
+            discount INTEGER NOT NULL,
+            active INTEGER DEFAULT 1
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+# ---------- FOYDALANUVCHILAR (reklama uchun) ----------
+def add_user(user_id: int):
+    conn = get_conn()
+    conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_all_user_ids():
+    conn = get_conn()
+    rows = conn.execute("SELECT user_id FROM users").fetchall()
+    conn.close()
+    return [row["user_id"] for row in rows]
+
+
+def get_user_count() -> int:
+    conn = get_conn()
+    row = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()
+    conn.close()
+    return row["c"]
+
+
+# ---------- PROMOKODLAR ----------
+def add_promocode(code: str, discount: int):
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO promocodes (code, discount, active) VALUES (?, ?, 1)",
+        (code.upper(), discount)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_promocode(code: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM promocodes WHERE code = ? AND active = 1", (code.upper(),)
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def get_all_promocodes():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM promocodes ORDER BY code").fetchall()
+    conn.close()
+    return rows
+
+
+def delete_promocode(code: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM promocodes WHERE code = ?", (code.upper(),))
     conn.commit()
     conn.close()
 
