@@ -76,6 +76,17 @@ def init_db():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id SERIAL PRIMARY KEY,
+            item_id INTEGER,
+            user_id BIGINT,
+            price INTEGER,
+            promo_code TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -109,6 +120,39 @@ def get_user_count() -> int:
     cur.close()
     conn.close()
     return row["c"]
+
+
+# ---------- BUYURTMALAR (statistika uchun) ----------
+def log_order(item_id: int, user_id: int, price: int, promo_code: str = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO orders (item_id, user_id, price, promo_code) VALUES (%s, %s, %s, %s)",
+        (item_id, user_id, price, promo_code)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_order_count() -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM orders")
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row["c"]
+
+
+def get_total_revenue() -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(SUM(price), 0) AS s FROM orders")
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row["s"]
 
 
 # ---------- PROMOKODLAR ----------
