@@ -19,6 +19,14 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot ishlab turibdi.")
 
+    def do_HEAD(self):
+        # UptimeRobot va boshqa monitoring xizmatlari ko'pincha HEAD so'rovi
+        # yuboradi (GET emas) - shuni ham qo'llab-quvvatlashimiz kerak,
+        # aks holda ular xato ravishda "bot ishlamayapti" deb hisoblaydi.
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+
     def log_message(self, format, *args):
         pass  # konsolni keraksiz loglar bilan to'ldirmaslik uchun
 
