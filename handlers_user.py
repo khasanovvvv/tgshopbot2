@@ -55,7 +55,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services")],
         [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top")],
         [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact")],
-        [InlineKeyboardButton(text=f"{e_channel} Biz kanali", url=channel_url)],
+        [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
     ])
     return kb
 
@@ -67,7 +67,7 @@ def back_button(callback_data: str) -> InlineKeyboardButton:
 
 WELCOME_TEXT = (
     f"Assalomu alaykum! {tge('wave', '👋')}\n\n"
-    "✨ Bizning botga xush kelibsiz. Bu yerda siz ⭐ <b>Telegram Premium</b> va boshqa "
+    "✨ Bizning botga xush kelibsiz. Bu yerda siz  <b>Telegram Premium</b> va boshqa "
     "xizmatlarimizni buyurtma qilishingiz mumkin.\n\n"
     "Quyidagi menyudan kerakli bo'limni tanlang 👇"
 )
@@ -89,7 +89,7 @@ async def back_to_main(callback: CallbackQuery):
 async def contact_admin(callback: CallbackQuery):
     admin_username = db.get_setting("admin_username")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}")],
+        [InlineKeyboardButton(text="✍️ Admin bilan aloqa", url=f"https://t.me/{admin_username.lstrip('@')}")],
         [back_button("menu:main")],
     ])
     await callback.message.edit_text(
