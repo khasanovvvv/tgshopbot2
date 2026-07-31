@@ -29,6 +29,9 @@ CUSTOM_EMOJI = {
     "new": "5382357040008021292",        # 🆕
     "fire": "5424972470023104089",       # 🔥
     "check": "5206607081334906820",      # ✔️
+    "exclaim": "5440660757194744323",    # ‼️
+    "bag": "5406683434124859552",        # 🛍
+    "soon": "5440621591387980068",       # 🔜
 }
 
 
@@ -100,12 +103,11 @@ async def contact_admin(callback: CallbackQuery):
 @router.callback_query(F.data == "menu:services")
 async def show_categories(callback: CallbackQuery):
     categories = db.get_categories()
-    e_services = db.get_setting("emoji_services") or "🛍"
 
     if not categories:
         kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
         await callback.message.edit_text(
-            "Hozircha xizmatlar qo'shilmagan. Tez orada qo'shiladi.",
+            f"Hozircha xizmatlar qo'shilmagan. Tez orada qo'shiladi. {tge('soon', '🔜')}",
             reply_markup=kb
         )
         await callback.answer()
@@ -117,7 +119,7 @@ async def show_categories(callback: CallbackQuery):
     ]
     buttons.append([back_button("menu:main")])
 
-    header = f"{tge('new', '🆕')} {e_services} Kerakli xizmat turini tanlang:"
+    header = f"{tge('new', '🆕')} Kerakli xizmat turini tanlang:"
     await callback.message.edit_text(
         header,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -148,7 +150,7 @@ async def show_top_items(callback: CallbackQuery):
     ]
     buttons.append([back_button("menu:main")])
 
-    header = f"{tge('fire', '🔥')} <b>Top takliflar</b>:"
+    header = f"{tge('bag', '🛍')} {tge('fire', '🔥')} <b>Top takliflar</b>:"
     await callback.message.edit_text(
         header,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -284,6 +286,8 @@ async def make_order_promo(callback: CallbackQuery, bot: Bot):
 
 
 async def send_order_notification(bot: Bot, user, item, final_price: int, promo_code):
+    db.log_order(item["id"], user.id, final_price, promo_code)
+
     username_part = f"@{user.username}" if user.username else "username yo'q"
     text = (
         "🆕 Yangi buyurtma!\n\n"
