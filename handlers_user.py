@@ -144,7 +144,8 @@ async def show_top_items(callback: CallbackQuery):
     buttons = [
         [InlineKeyboardButton(
             text=f"🔥 {item['name']} — {item['price']:,} so'm".replace(",", " "),
-            callback_data=f"item:{item['id']}"
+            callback_data=f"item:{item['id']}",
+            style="danger"
         )]
         for item in items
     ]
@@ -177,7 +178,8 @@ async def show_items(callback: CallbackQuery):
     buttons = [
         [InlineKeyboardButton(
             text=("🔥 " if item["is_top"] else "") + f"{item['name']} — {item['price']:,} so'm".replace(",", " "),
-            callback_data=f"item:{item['id']}"
+            callback_data=f"item:{item['id']}",
+            style="danger" if item["is_top"] else None
         )]
         for item in items
     ]
