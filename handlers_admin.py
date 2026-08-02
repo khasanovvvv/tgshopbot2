@@ -60,7 +60,7 @@ class AddPromo(StatesGroup):
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data="admin:add_cat")],
+        [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data="admin:add_cat", style="primary")],
         [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories")],
         [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos")],
         [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin:broadcast")],
@@ -152,15 +152,15 @@ async def manage_category(callback: CallbackQuery):
         text += "(hozircha yo'q)"
 
     buttons = [
-        [InlineKeyboardButton(text="➕ Xizmat qo'shish", callback_data=f"admin:additem:{category_id}")],
+        [InlineKeyboardButton(text="➕ Xizmat qo'shish", callback_data=f"admin:additem:{category_id}", style="primary")],
     ]
     for it in items:
         buttons.append([
             InlineKeyboardButton(text=f"✏️ {it['name']}", callback_data=f"admin:item:{it['id']}"),
-            InlineKeyboardButton(text="🗑", callback_data=f"admin:delitem:{it['id']}:{category_id}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"admin:delitem:{it['id']}:{category_id}", style="danger"),
         ])
     buttons.append([InlineKeyboardButton(text="✏️ Nomini o'zgartirish", callback_data=f"admin:renamecat:{category_id}")])
-    buttons.append([InlineKeyboardButton(text="🗑 Kategoriyani o'chirish", callback_data=f"admin:delcat:{category_id}")])
+    buttons.append([InlineKeyboardButton(text="🗑 Kategoriyani o'chirish", callback_data=f"admin:delcat:{category_id}", style="danger")])
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:categories")])
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -393,10 +393,10 @@ async def promos_menu(callback: CallbackQuery):
     else:
         text += "(hozircha yo'q)"
 
-    buttons = [[InlineKeyboardButton(text="➕ Promokod qo'shish", callback_data="admin:addpromo")]]
+    buttons = [[InlineKeyboardButton(text="➕ Promokod qo'shish", callback_data="admin:addpromo", style="primary")]]
     for p in promos:
         buttons.append([InlineKeyboardButton(
-            text=f"🗑 {p['code']} o'chirish", callback_data=f"admin:delpromo:{p['code']}"
+            text=f"🗑 {p['code']} o'chirish", callback_data=f"admin:delpromo:{p['code']}", style="danger"
         )])
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
 
@@ -472,7 +472,7 @@ async def broadcast_received(message: Message, state: FSMContext):
         return
     await state.update_data(chat_id=message.chat.id, message_id=message.message_id)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="↪️ Forward qilib yuborish", callback_data="admin:bcast_forward")],
+        [InlineKeyboardButton(text="↪️ Forward qilib yuborish", callback_data="admin:bcast_forward", style="primary")],
         [InlineKeyboardButton(text="📋 Nusxa sifatida (forwardsiz)", callback_data="admin:bcast_copy")],
         [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")],
     ])
