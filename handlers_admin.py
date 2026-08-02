@@ -118,7 +118,7 @@ async def list_categories_admin(callback: CallbackQuery):
     categories = db.get_categories()
     if not categories:
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main", style="success")]
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")]
         ])
         await callback.message.edit_text("Kategoriyalar mavjud emas.", reply_markup=kb)
         await callback.answer()
@@ -128,7 +128,7 @@ async def list_categories_admin(callback: CallbackQuery):
         [InlineKeyboardButton(text=cat["name"], callback_data=f"admin:cat:{cat['id']}", style="success")]
         for cat in categories
     ]
-    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
     await callback.message.edit_text(
         "Boshqarish uchun kategoriyani tanlang:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -161,7 +161,7 @@ async def manage_category(callback: CallbackQuery):
         ])
     buttons.append([InlineKeyboardButton(text="✏️ Nomini o'zgartirish", callback_data=f"admin:renamecat:{category_id}", style="success")])
     buttons.append([InlineKeyboardButton(text="🗑 Kategoriyani o'chirish", callback_data=f"admin:delcat:{category_id}", style="danger")])
-    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:categories", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:categories")])
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
@@ -271,7 +271,7 @@ async def edit_item_menu(callback: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💰 Narxni o'zgartirish", callback_data=f"admin:editprice:{item_id}", style="success")],
         [InlineKeyboardButton(text=top_button_text, callback_data=f"admin:toggletop:{item_id}", style="success")],
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:cat:{item['category_id']}", style="success")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:cat:{item['category_id']}")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
@@ -338,7 +338,7 @@ async def settings_menu(callback: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Admin username", callback_data="admin:set_admin", style="success")],
         [InlineKeyboardButton(text="✏️ Kanal link", callback_data="admin:set_channel", style="success")],
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main", style="success")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
@@ -398,7 +398,7 @@ async def promos_menu(callback: CallbackQuery):
         buttons.append([InlineKeyboardButton(
             text=f"🗑 {p['code']} o'chirish", callback_data=f"admin:delpromo:{p['code']}", style="danger"
         )])
-    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
@@ -456,7 +456,7 @@ async def broadcast_start(callback: CallbackQuery, state: FSMContext):
     user_count = db.get_user_count()
     await state.set_state(BroadcastState.waiting_content)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main", style="success")]
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")]
     ])
     await callback.message.edit_text(
         f"📢 Reklama xabarini yuboring (matn, rasm, video - har qanday turi bo'lishi mumkin).\n\n"
@@ -474,7 +474,7 @@ async def broadcast_received(message: Message, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↪️ Forward qilib yuborish", callback_data="admin:bcast_forward", style="primary")],
         [InlineKeyboardButton(text="📋 Nusxa sifatida (forwardsiz)", callback_data="admin:bcast_copy", style="success")],
-        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main", style="success")],
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")],
     ])
     await message.answer("Qanday yuborilsin?", reply_markup=kb)
 
@@ -532,7 +532,7 @@ async def emoji_settings_menu(callback: CallbackQuery):
         current = db.get_setting(key) or "-"
         text += f"{current} — {label}\n"
         buttons.append([InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"admin:setemoji:{key}", style="success")])
-    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main", style="success")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
 
@@ -575,7 +575,7 @@ async def stats_menu(callback: CallbackQuery):
         f"💵 Jami tushum: {total_revenue:,} so'm".replace(",", " ")
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main", style="success")]
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")]
     ])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
