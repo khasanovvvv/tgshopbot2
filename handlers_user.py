@@ -62,7 +62,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 def back_button(callback_data: str) -> InlineKeyboardButton:
     e_back = db.get_setting("emoji_back") or "🔙"
-    return InlineKeyboardButton(text=f"{e_back} Orqaga", callback_data=callback_data, style="success")
+    return InlineKeyboardButton(text=f"{e_back} Orqaga", callback_data=callback_data)
 
 
 WELCOME_TEXT = (
