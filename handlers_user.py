@@ -54,7 +54,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
         [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
-        [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact")],
+        [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success")],
         [InlineKeyboardButton(text=f"{e_channel} Biz kanali", url=channel_url)],
     ])
     return kb
@@ -62,7 +62,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 def back_button(callback_data: str) -> InlineKeyboardButton:
     e_back = db.get_setting("emoji_back") or "🔙"
-    return InlineKeyboardButton(text=f"{e_back} Orqaga", callback_data=callback_data)
+    return InlineKeyboardButton(text=f"{e_back} Orqaga", callback_data=callback_data, style="success")
 
 
 WELCOME_TEXT = (
@@ -89,7 +89,7 @@ async def back_to_main(callback: CallbackQuery):
 async def contact_admin(callback: CallbackQuery):
     admin_username = db.get_setting("admin_username")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}")],
+        [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}", style="success")],
         [back_button("menu:main")],
     ])
     await callback.message.edit_text(
@@ -114,7 +114,7 @@ async def show_categories(callback: CallbackQuery):
         return
 
     buttons = [
-        [InlineKeyboardButton(text=cat["name"], callback_data=f"cat:{cat['id']}")]
+        [InlineKeyboardButton(text=cat["name"], callback_data=f"cat:{cat['id']}", style="success")]
         for cat in categories
     ]
     buttons.append([back_button("menu:main")])
