@@ -52,10 +52,10 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     e_top = db.get_setting("emoji_top") or "🔥"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services")],
-        [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top")],
+        [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
+        [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
         [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact")],
-        [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
+        [InlineKeyboardButton(text=f"{e_channel} Biz kanali", url=channel_url)],
     ])
     return kb
 
@@ -67,7 +67,7 @@ def back_button(callback_data: str) -> InlineKeyboardButton:
 
 WELCOME_TEXT = (
     f"Assalomu alaykum! {tge('wave', '👋')}\n\n"
-    "✨ Bizning botga xush kelibsiz. Bu yerda siz  <b>Telegram Premium</b> va boshqa "
+    "✨ Bizning botga xush kelibsiz. Bu yerda siz ⭐ <b>Telegram Premium</b> va boshqa "
     "xizmatlarimizni buyurtma qilishingiz mumkin.\n\n"
     "Quyidagi menyudan kerakli bo'limni tanlang 👇"
 )
@@ -89,7 +89,7 @@ async def back_to_main(callback: CallbackQuery):
 async def contact_admin(callback: CallbackQuery):
     admin_username = db.get_setting("admin_username")
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Admin bilan aloqa", url=f"https://t.me/{admin_username.lstrip('@')}")],
+        [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}")],
         [back_button("menu:main")],
     ])
     await callback.message.edit_text(
@@ -205,8 +205,8 @@ async def show_item(callback: CallbackQuery, state: FSMContext):
 
     e_order = db.get_setting("emoji_order") or "✅"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{e_order} Buyurtma berish", callback_data=f"order:{item['id']}")],
-        [InlineKeyboardButton(text="🎟 Promokod kiritish", callback_data=f"promo:{item['id']}")],
+        [InlineKeyboardButton(text=f"{e_order} Buyurtma berish", callback_data=f"order:{item['id']}", style="success")],
+        [InlineKeyboardButton(text="🎟 Promokod kiritish", callback_data=f"promo:{item['id']}", style="primary")],
         [back_button(f"cat:{item['category_id']}")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
@@ -254,7 +254,8 @@ async def promo_check(message: Message, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="✅ Buyurtma berish (chegirma bilan)",
-            callback_data=f"orderpromo:{item_id}:{promo['code']}"
+            callback_data=f"orderpromo:{item_id}:{promo['code']}",
+            style="success"
         )],
         [back_button(f"item:{item_id}")],
     ])
