@@ -55,7 +55,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
         [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
         [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success")],
-        [InlineKeyboardButton(text=f"{e_channel} Biz kanali", url=channel_url)],
+        [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
     ])
     return kb
 
