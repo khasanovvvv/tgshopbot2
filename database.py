@@ -80,6 +80,35 @@ def init_db():
             user_id BIGINT PRIMARY KEY
         )
     """)
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS balance INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked INTEGER DEFAULT 0")
+
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("payment_card_number", "0000 0000 0000 0000")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("payment_min_amount", "1000")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("payment_card_owner", "F.I.SH")
+    )
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS topups (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            amount INTEGER,
+            receipt_file_id TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS promocodes (
@@ -115,6 +144,49 @@ def add_user(user_id: int):
     release(conn)
 
 
+def save_user_info(user_id: int, phone: str = None, full_name: str = None, username: str = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    if phone is not None:
+        cur.execute("UPDATE users SET phone = %s WHERE user_id = %s", (phone, user_id))
+    if full_name is not None:
+        cur.execute("UPDATE users SET full_name = %s WHERE user_id = %s", (full_name, user_id))
+    if username is not None:
+        cur.execute("UPDATE users SET username = %s WHERE user_id = %s", (username, user_id))
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
+def get_user(user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
+def has_phone(user_id: int) -> bool:
+    user = get_user(user_id)
+    return bool(user and user["phone"])
+
+
+def is_blocked(user_id: int) -> bool:
+    user = get_user(user_id)
+    return bool(user and user["blocked"])
+
+
+def set_blocked(user_id: int, blocked: bool):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET blocked = %s WHERE user_id = %s", (1 if blocked else 0, user_id))
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
 def get_all_user_ids():
     conn = get_conn()
     cur = conn.cursor()
@@ -133,6 +205,61 @@ def get_user_count() -> int:
     cur.close()
     release(conn)
     return row["c"]
+
+
+# ---------- BALANS ----------
+def get_balance(user_id: int) -> int:
+    user = get_user(user_id)
+    return user["balance"] if user else 0
+
+
+def add_balance(user_id: int, amount: int) -> int:
+    """Balansga qo'shadi (manfiy son bo'lsa ayiradi). Yangi balansni qaytaradi."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET balance = GREATEST(0, balance + %s) WHERE user_id = %s RETURNING balance",
+        (amount, user_id)
+    )
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    release(conn)
+    return row["balance"] if row else 0
+
+
+# ---------- BALANS TO'LDIRISH (TOPUP) ----------
+def create_topup(user_id: int, amount: int, receipt_file_id: str) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO topups (user_id, amount, receipt_file_id) VALUES (%s, %s, %s) RETURNING id",
+        (user_id, amount, receipt_file_id)
+    )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    release(conn)
+    return new_id
+
+
+def get_topup(topup_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM topups WHERE id = %s", (topup_id,))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
+def set_topup_status(topup_id: int, status: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE topups SET status = %s WHERE id = %s", (status, topup_id))
+    conn.commit()
+    cur.close()
+    release(conn)
 
 
 # ---------- BUYURTMALAR (statistika uchun) ----------
