@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import database as db
+import smm_api
 from config import ADMIN_ID
 
 router = Router()
@@ -23,6 +24,12 @@ class PromoState(StatesGroup):
 class TopupState(StatesGroup):
     waiting_amount = State()
     waiting_receipt = State()
+
+
+class SmmOrderState(StatesGroup):
+    service_id = State()
+    waiting_link = State()
+    waiting_quantity = State()
 
 
 # ---------- Premium (maxsus animatsion) emojilar ----------
@@ -56,9 +63,10 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
         [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
+        [InlineKeyboardButton(text="📈 Nakrutka xizmati", callback_data="menu:smm", style="primary")],
         [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")],
         [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success")],
-        [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
+        [InlineKeyboardButton(text=f"{e_channel} Biz kanali", url=channel_url)],
     ])
     return kb
 
@@ -430,3 +438,188 @@ async def send_order_confirmation(bot: Bot, user_id: int, item, final_price: int
         "Tez orada admin siz bilan bog'lanadi."
     )
     await bot.send_message(user_id, text)
+
+
+# ---------- NAKRUTKA (SMM) XIZMATLARI ----------
+@router.callback_query(F.data == "menu:smm")
+async def show_platforms(callback: CallbackQuery):
+    platforms = db.get_platforms()
+
+    if not platforms:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
+        await callback.message.edit_text(
+            "Hozircha nakrutka xizmatlari qo'shilmagan.",
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    # 2 tadan qator qilib joylashtiramiz (skrindagi ko'rinishga o'xshab)
+    buttons = []
+    row = []
+    for p in platforms:
+        row.append(InlineKeyboardButton(
+            text=f"{p['emoji']} {p['name']}", callback_data=f"smmcat:{p['id']}", style="success"
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([back_button("menu:main")])
+
+    await callback.message.edit_text(
+        "📈 Qaysi platforma uchun xizmat kerak?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("smmcat:"))
+async def show_smm_services(callback: CallbackQuery):
+    platform_id = int(callback.data.split(":")[1])
+    platform = db.get_platform(platform_id)
+    services = db.get_smm_services_by_platform(platform_id)
+
+    if not services:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:smm")]])
+        await callback.message.edit_text(
+            f"«{platform['name']}» uchun hozircha xizmatlar yo'q.",
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"{s['name']} — {s['price_per_1000']:,} so'm/1000".replace(",", " "),
+            callback_data=f"smmservice:{s['id']}",
+            style="success"
+        )]
+        for s in services
+    ]
+    buttons.append([back_button("menu:smm")])
+
+    await callback.message.edit_text(
+        f"{platform['emoji']} {platform['name']} xizmatlari:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("smmservice:"))
+async def smm_service_info(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    service = db.get_smm_service(service_id)
+
+    text = (
+        f"📦 {service['name']}\n\n"
+        f"💵 Narxi: {service['price_per_1000']:,} so'm / 1000 dona\n".replace(",", " ") +
+        f"🔢 Minimal: {service['min_qty']} — Maksimal: {service['max_qty']}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Buyurtma berish", callback_data=f"smmorder:{service_id}", style="success")],
+        [back_button(f"smmcat:{service['platform_id']}")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("smmorder:"))
+async def smm_order_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+    await state.set_state(SmmOrderState.waiting_link)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[back_button(f"smmservice:{service_id}")]])
+    await callback.message.edit_text(
+        "🔗 Havola yoki username yuboring (masalan: https://t.me/kanal):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(SmmOrderState.waiting_link)
+async def smm_order_link(message: Message, state: FSMContext):
+    await state.update_data(link=message.text.strip())
+    data = await state.get_data()
+    service = db.get_smm_service(data["service_id"])
+    await state.set_state(SmmOrderState.waiting_quantity)
+    await message.answer(
+        f"🔢 Miqdorni kiriting (raqam):\n"
+        f"Minimal: {service['min_qty']} — Maksimal: {service['max_qty']}"
+    )
+
+
+@router.message(SmmOrderState.waiting_quantity)
+async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+
+    quantity = int(message.text.strip())
+    data = await state.get_data()
+    service = db.get_smm_service(data["service_id"])
+
+    if quantity < service["min_qty"] or quantity > service["max_qty"]:
+        await message.answer(
+            f"❗️ Miqdor {service['min_qty']} dan {service['max_qty']} gacha bo'lishi kerak."
+        )
+        return
+
+    price = round(service["price_per_1000"] * quantity / 1000)
+    balance = db.get_balance(message.from_user.id)
+
+    if balance < price:
+        await state.clear()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")]
+        ])
+        await message.answer(
+            f"❌ Balansingiz yetarli emas.\n\n"
+            f"Kerak: {price:,} so'm\n".replace(",", " ") +
+            f"Sizda: {balance:,} so'm".replace(",", " "),
+            reply_markup=kb
+        )
+        return
+
+    link = data["link"]
+    await state.clear()
+
+    # Panelga buyurtma yuboramiz
+    result = smm_api.place_order(service["panel_service_id"], link, quantity)
+    panel_order_id = result.get("order") if isinstance(result, dict) else None
+
+    if not panel_order_id:
+        error_msg = result.get("error", "Noma'lum xatolik") if isinstance(result, dict) else "Noma'lum xatolik"
+        await message.answer(
+            f"❌ Buyurtma yuborishda xatolik yuz berdi: {error_msg}\n\n"
+            "Balansingizdan pul yechilmadi. Iltimos, keyinroq qayta urinib ko'ring yoki admin bilan bog'laning."
+        )
+        return
+
+    db.add_balance(message.from_user.id, -price)
+    db.create_smm_order(message.from_user.id, service["id"], link, quantity, price, panel_order_id)
+
+    await message.answer(
+        f"{tge('check', '✔️')} Buyurtma qabul qilindi!\n\n"
+        f"📦 {service['name']}\n"
+        f"🔗 {link}\n"
+        f"🔢 Miqdor: {quantity}\n"
+        f"💵 Narxi: {price:,} so'm\n".replace(",", " ") +
+        f"🆔 Buyurtma raqami: {panel_order_id}\n\n" +
+        "Buyurtmangiz bajarilishi biroz vaqt olishi mumkin."
+    )
+
+    user = message.from_user
+    username_part = f"@{user.username}" if user.username else "username yo'q"
+    await bot.send_message(
+        ADMIN_ID,
+        "📈 Yangi nakrutka buyurtmasi!\n\n"
+        f"👤 {user.full_name} ({username_part})\n"
+        f"🆔 ID: {user.id}\n\n"
+        f"📦 {service['name']}\n"
+        f"🔗 {link}\n"
+        f"🔢 Miqdor: {quantity}\n"
+        f"💵 Narxi: {price:,} so'm\n".replace(",", " ") +
+        f"🆔 Panel buyurtma raqami: {panel_order_id}"
+    )
