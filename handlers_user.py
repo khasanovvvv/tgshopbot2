@@ -1,7 +1,8 @@
 # handlers_user.py
 from aiogram import Router, F, Bot
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -13,17 +14,18 @@ from config import ADMIN_ID
 router = Router()
 
 
-# ---------- FSM (promokod kiritish uchun) ----------
+# ---------- FSM ----------
 class PromoState(StatesGroup):
     item_id = State()
     waiting_code = State()
 
 
+class TopupState(StatesGroup):
+    waiting_amount = State()
+    waiting_receipt = State()
+
+
 # ---------- Premium (maxsus animatsion) emojilar ----------
-# Bular faqat XABAR MATNIDA ko'rinadi (Telegram Bot API cheklovi tufayli
-# tugma matnida hech qanday bot buni ko'rsata olmaydi). Faqat Telegram
-# Premium foydalanuvchilar animatsiyasini ko'radi, boshqalar oddiy emojini
-# ko'radi - shuning uchun bu xavfsiz "graceful fallback".
 CUSTOM_EMOJI = {
     "wave": "5472235990955334730",       # 👋
     "new": "5382357040008021292",        # 🆕
@@ -54,8 +56,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
         [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
+        [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")],
         [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success")],
-        [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
+        [InlineKeyboardButton(text=f"{e_channel} Biz kanali", url=channel_url)],
     ])
     return kb
 
@@ -72,10 +75,48 @@ WELCOME_TEXT = (
     "Quyidagi menyudan kerakli bo'limni tanlang 👇"
 )
 
+PHONE_REQUEST_TEXT = (
+    "🔒 Xavfsizlik maqsadida, davom etishdan oldin telefon raqamingizni tasdiqlashingiz kerak.\n\n"
+    "Pastdagi tugmani bosib, raqamingizni yuboring 👇"
+)
+
+
+def phone_request_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     db.add_user(message.from_user.id)
+
+    if db.is_blocked(message.from_user.id):
+        await message.answer("⛔️ Siz botdan foydalanish huquqidan mahrum qilingansiz.")
+        return
+
+    if not db.has_phone(message.from_user.id):
+        await message.answer(PHONE_REQUEST_TEXT, reply_markup=phone_request_kb())
+        return
+
+    await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+
+
+@router.message(F.contact)
+async def contact_received(message: Message):
+    if message.contact.user_id != message.from_user.id:
+        await message.answer("❗️ Iltimos, faqat o'zingizning raqamingizni yuboring.")
+        return
+
+    db.save_user_info(
+        message.from_user.id,
+        phone=message.contact.phone_number,
+        full_name=message.from_user.full_name,
+        username=message.from_user.username
+    )
+    await message.answer("✅ Raqamingiz tasdiqlandi!", reply_markup=ReplyKeyboardRemove())
     await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
 
 
@@ -97,6 +138,84 @@ async def contact_admin(callback: CallbackQuery):
         reply_markup=kb
     )
     await callback.answer()
+
+
+# ---------- BALANSNI TO'LDIRISH ----------
+@router.callback_query(F.data == "menu:topup")
+async def topup_start(callback: CallbackQuery, state: FSMContext):
+    min_amount = db.get_setting("payment_min_amount") or "1000"
+    balance = db.get_balance(callback.from_user.id)
+    await state.set_state(TopupState.waiting_amount)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
+    await callback.message.edit_text(
+        f"💰 Joriy balansingiz: <b>{balance:,} so'm</b>\n\n".replace(",", " ") +
+        "💳 To'lov usuli: Uzcard/Humo (avto)\n\n"
+        "💵 To'lov miqdorini kiriting:\n"
+        f"⏩ Minimal: {int(min_amount):,} so'm".replace(",", " "),
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(TopupState.waiting_amount)
+async def topup_amount(message: Message, state: FSMContext):
+    if not message.text or not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+
+    amount = int(message.text.strip())
+    min_amount = int(db.get_setting("payment_min_amount") or "1000")
+    if amount < min_amount:
+        await message.answer(f"❗️ Minimal summa {min_amount:,} so'm".replace(",", " "))
+        return
+
+    await state.update_data(amount=amount)
+    await state.set_state(TopupState.waiting_receipt)
+
+    card_number = db.get_setting("payment_card_number")
+    card_owner = db.get_setting("payment_card_owner")
+    await message.answer(
+        f"💳 Karta raqami: <code>{card_number}</code>\n"
+        f"👤 Egasi: {card_owner}\n\n"
+        f"Summani ({amount:,} so'm) shu kartaga o'tkazing.\n".replace(",", " ") +
+        "📝 To'lov chekini (rasm) yuboring:"
+    )
+
+
+@router.message(TopupState.waiting_receipt, F.photo)
+async def topup_receipt(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    amount = data["amount"]
+    await state.clear()
+
+    receipt_file_id = message.photo[-1].file_id
+    topup_id = db.create_topup(message.from_user.id, amount, receipt_file_id)
+
+    await message.answer(
+        "✅ Qabul qilindi.\n\n"
+        "<i>To'lov cheki 15-60 daqiqa ichida tekshiriladi!</i>"
+    )
+
+    user = message.from_user
+    username_part = f"@{user.username}" if user.username else "username yo'q"
+    caption = (
+        "💳 Yangi balans to'ldirish so'rovi!\n\n"
+        f"👤 Foydalanuvchi: {user.full_name} ({username_part})\n"
+        f"🆔 ID: {user.id}\n"
+        f"💵 Summa: {amount:,} so'm".replace(",", " ")
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"topup_ok:{topup_id}", style="success"),
+            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"topup_no:{topup_id}", style="danger"),
+        ]
+    ])
+    await bot.send_photo(ADMIN_ID, receipt_file_id, caption=caption, reply_markup=kb)
+
+
+@router.message(TopupState.waiting_receipt)
+async def topup_receipt_invalid(message: Message):
+    await message.answer("❗️ Iltimos, to'lov chekini RASM shaklida yuboring.")
 
 
 # ---------- XIZMATLAR (KATEGORIYALAR) ----------
