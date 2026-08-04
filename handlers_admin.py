@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import database as db
+import smm_api
 from config import ADMIN_ID
 from handlers_user import tge
 
@@ -73,12 +74,30 @@ class PaymentSettings(StatesGroup):
     min_amount = State()
 
 
+class AddPlatform(StatesGroup):
+    name = State()
+    emoji = State()
+
+
+class SearchPanelServices(StatesGroup):
+    keyword = State()
+
+
+class AddSmmService(StatesGroup):
+    platform_id = State()
+    panel_service_id = State()
+    name = State()
+    price = State()
+    min_qty = State()
+    max_qty = State()
+
+
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data="admin:add_cat", style="primary")],
         [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories", style="success")],
-       [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin:users", style="success")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin:users", style="success")],
         [InlineKeyboardButton(text="📈 Nakrutka xizmatlari", callback_data="admin:smm", style="success")],
         [InlineKeyboardButton(text="💳 To'lov sozlamalari", callback_data="admin:payment_settings", style="success")],
         [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos", style="success")],
@@ -854,3 +873,231 @@ async def set_min_amount_finish(message: Message, state: FSMContext):
     db.set_setting("payment_min_amount", message.text.strip())
     await state.clear()
     await message.answer("✅ Minimal summa yangilandi.", reply_markup=admin_menu_kb())
+
+
+# ---------- NAKRUTKA (SMM) XIZMATLARI BOSHQARUVI ----------
+@router.callback_query(F.data == "admin:smm")
+async def smm_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    platforms = db.get_platforms()
+    text = "📈 <b>Nakrutka xizmatlari</b>\n\n"
+    if platforms:
+        for p in platforms:
+            services = db.get_smm_services_by_platform(p["id"])
+            text += f"{p['emoji']} {p['name']} — {len(services)} ta xizmat\n"
+    else:
+        text += "(hozircha platforma qo'shilmagan)"
+
+    buttons = [
+        [InlineKeyboardButton(text="➕ Platforma qo'shish", callback_data="admin:add_platform", style="primary")],
+        [InlineKeyboardButton(text="🔍 Panel xizmatlarini qidirish", callback_data="admin:search_panel", style="primary")],
+    ]
+    for p in platforms:
+        buttons.append([InlineKeyboardButton(
+            text=f"{p['emoji']} {p['name']}", callback_data=f"admin:platform:{p['id']}", style="success"
+        )])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:add_platform")
+async def add_platform_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(AddPlatform.name)
+    await callback.message.edit_text("Platforma nomini kiriting (masalan: Telegram):")
+    await callback.answer()
+
+
+@router.message(AddPlatform.name)
+async def add_platform_name(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.update_data(name=message.text.strip())
+    await state.set_state(AddPlatform.emoji)
+    await message.answer("Endi platforma uchun emoji yuboring (masalan: ✈️):")
+
+
+@router.message(AddPlatform.emoji)
+async def add_platform_emoji(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    db.add_platform(data["name"], message.text.strip())
+    await state.clear()
+    await message.answer(f"✅ «{data['name']}» platformasi qo'shildi.", reply_markup=admin_menu_kb())
+
+
+@router.callback_query(F.data.startswith("admin:platform:"))
+async def manage_platform(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    platform_id = int(callback.data.split(":")[2])
+    platform = db.get_platform(platform_id)
+    services = db.get_smm_services_by_platform(platform_id)
+
+    text = f"{platform['emoji']} <b>{platform['name']}</b>\n\nXizmatlar:\n"
+    if services:
+        for s in services:
+            text += f"• {s['name']} — {s['price_per_1000']:,} so'm/1000\n".replace(",", " ")
+    else:
+        text += "(hozircha yo'q)"
+
+    buttons = [
+        [InlineKeyboardButton(text="➕ Xizmat qo'shish", callback_data=f"admin:add_smm_service:{platform_id}", style="primary")],
+    ]
+    for s in services:
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {s['name']}", callback_data=f"admin:del_smm_service:{s['id']}:{platform_id}", style="danger"
+        )])
+    buttons.append([InlineKeyboardButton(text="🗑 Platformani o'chirish", callback_data=f"admin:del_platform:{platform_id}", style="danger")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:smm")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:del_platform:"))
+async def del_platform_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    platform_id = int(callback.data.split(":")[2])
+    db.delete_platform(platform_id)
+    await callback.answer("Platforma o'chirildi ✅", show_alert=True)
+    await smm_menu(callback)
+
+
+@router.callback_query(F.data.startswith("admin:del_smm_service:"))
+async def del_smm_service_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    parts = callback.data.split(":")
+    service_id, platform_id = int(parts[2]), int(parts[3])
+    db.delete_smm_service(service_id)
+    await callback.answer("Xizmat o'chirildi ✅", show_alert=True)
+    await manage_platform(callback)
+
+
+# ---------- 1XPANEL'DAN XIZMAT QIDIRISH ----------
+@router.callback_query(F.data == "admin:search_panel")
+async def search_panel_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(SearchPanelServices.keyword)
+    await callback.message.edit_text(
+        "🔍 Qidiruv so'zini kiriting (masalan: instagram followers, telegram members):"
+    )
+    await callback.answer()
+
+
+@router.message(SearchPanelServices.keyword)
+async def search_panel_result(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    keyword = message.text.strip().lower()
+
+    await message.answer("⏳ Qidirilmoqda...")
+    result = smm_api.get_services()
+
+    if not isinstance(result, list):
+        error = result.get("error") if isinstance(result, dict) else "Noma'lum xatolik"
+        await message.answer(f"❌ Panel bilan bog'lanishda xatolik: {error}")
+        return
+
+    matches = [s for s in result if keyword in s.get("name", "").lower()][:15]
+
+    if not matches:
+        await message.answer("Hech narsa topilmadi. Boshqa so'z bilan urinib ko'ring.")
+        return
+
+    text = "🔍 Topilgan xizmatlar (birinchi 15 tasi):\n\n"
+    for s in matches:
+        text += (
+            f"🆔 ID: {s.get('service')}\n"
+            f"📦 {s.get('name')}\n"
+            f"💵 Narx (panelda, $ yoki boshqa valyutada): {s.get('rate')} / 1000\n"
+            f"🔢 Min: {s.get('min')} — Max: {s.get('max')}\n\n"
+        )
+    text += "Kerakli xizmatning ID raqamini «➕ Xizmat qo'shish» bosganda kiritasiz."
+
+    await message.answer(text, reply_markup=admin_menu_kb())
+
+
+# ---------- XIZMAT QO'SHISH (SMM) ----------
+@router.callback_query(F.data.startswith("admin:add_smm_service:"))
+async def add_smm_service_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    platform_id = int(callback.data.split(":")[2])
+    await state.update_data(platform_id=platform_id)
+    await state.set_state(AddSmmService.panel_service_id)
+    await callback.message.edit_text(
+        "Panel xizmat ID raqamini kiriting (avval «🔍 Panel xizmatlarini qidirish» orqali toping):"
+    )
+    await callback.answer()
+
+
+@router.message(AddSmmService.panel_service_id)
+async def add_smm_service_id(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    await state.update_data(panel_service_id=int(message.text.strip()))
+    await state.set_state(AddSmmService.name)
+    await message.answer("Xizmat nomini kiriting (mijozlarga shu nom ko'rinadi):")
+
+
+@router.message(AddSmmService.name)
+async def add_smm_service_name(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.update_data(name=message.text.strip())
+    await state.set_state(AddSmmService.price)
+    await message.answer("1000 dona uchun sotish narxini kiriting (so'mda):")
+
+
+@router.message(AddSmmService.price)
+async def add_smm_service_price(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    await state.update_data(price=int(message.text.strip()))
+    await state.set_state(AddSmmService.min_qty)
+    await message.answer("Minimal miqdorni kiriting:")
+
+
+@router.message(AddSmmService.min_qty)
+async def add_smm_service_min(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    await state.update_data(min_qty=int(message.text.strip()))
+    await state.set_state(AddSmmService.max_qty)
+    await message.answer("Maksimal miqdorni kiriting:")
+
+
+@router.message(AddSmmService.max_qty)
+async def add_smm_service_max(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+
+    data = await state.get_data()
+    db.add_smm_service(
+        data["platform_id"], data["panel_service_id"], data["name"],
+        data["price"], data["min_qty"], int(message.text.strip())
+    )
+    await state.clear()
+    await message.answer(f"✅ «{data['name']}» xizmati qo'shildi.", reply_markup=admin_menu_kb())
