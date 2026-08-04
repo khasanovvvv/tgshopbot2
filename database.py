@@ -129,6 +129,40 @@ def init_db():
         )
     """)
 
+    # ---- NAKRUTKA (SMM) XIZMATLARI ----
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS smm_platforms (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            emoji TEXT DEFAULT '📱',
+            sort_order INTEGER DEFAULT 0
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS smm_services (
+            id SERIAL PRIMARY KEY,
+            platform_id INTEGER NOT NULL REFERENCES smm_platforms(id),
+            panel_service_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            price_per_1000 INTEGER NOT NULL,
+            min_qty INTEGER NOT NULL,
+            max_qty INTEGER NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS smm_orders (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            service_id INTEGER,
+            link TEXT,
+            quantity INTEGER,
+            price INTEGER,
+            panel_order_id INTEGER,
+            status TEXT DEFAULT 'yuborildi',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
     conn.commit()
     cur.close()
     release(conn)
@@ -502,3 +536,116 @@ def toggle_item_top(item_id: int) -> bool:
     cur.close()
     release(conn)
     return bool(new_value)
+
+
+# ---------- SMM PLATFORMALAR ----------
+def add_platform(name: str, emoji: str) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM smm_platforms"
+    )
+    next_order = cur.fetchone()["n"]
+    cur.execute(
+        "INSERT INTO smm_platforms (name, emoji, sort_order) VALUES (%s, %s, %s) RETURNING id",
+        (name, emoji, next_order)
+    )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    release(conn)
+    return new_id
+
+
+def get_platforms():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_platforms ORDER BY sort_order")
+    rows = cur.fetchall()
+    cur.close()
+    release(conn)
+    return rows
+
+
+def get_platform(platform_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_platforms WHERE id = %s", (platform_id,))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
+def delete_platform(platform_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM smm_services WHERE platform_id = %s", (platform_id,))
+    cur.execute("DELETE FROM smm_platforms WHERE id = %s", (platform_id,))
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
+# ---------- SMM XIZMATLAR ----------
+def add_smm_service(platform_id: int, panel_service_id: int, name: str,
+                     price_per_1000: int, min_qty: int, max_qty: int) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO smm_services
+           (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty)
+           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+        (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty)
+    )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    release(conn)
+    return new_id
+
+
+def get_smm_services_by_platform(platform_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_services WHERE platform_id = %s ORDER BY id", (platform_id,))
+    rows = cur.fetchall()
+    cur.close()
+    release(conn)
+    return rows
+
+
+def get_smm_service(service_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_services WHERE id = %s", (service_id,))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
+def delete_smm_service(service_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM smm_services WHERE id = %s", (service_id,))
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
+# ---------- SMM BUYURTMALAR ----------
+def create_smm_order(user_id: int, service_id: int, link: str, quantity: int,
+                      price: int, panel_order_id: int) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO smm_orders (user_id, service_id, link, quantity, price, panel_order_id)
+           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+        (user_id, service_id, link, quantity, price, panel_order_id)
+    )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    release(conn)
+    return new_id
