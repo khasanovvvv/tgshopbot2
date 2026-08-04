@@ -57,11 +57,29 @@ class AddPromo(StatesGroup):
     discount = State()
 
 
+class FindUser(StatesGroup):
+    waiting_id = State()
+
+
+class AdjustBalance(StatesGroup):
+    user_id = State()
+    mode = State()  # "add" yoki "subtract"
+    amount = State()
+
+
+class PaymentSettings(StatesGroup):
+    card_number = State()
+    card_owner = State()
+    min_amount = State()
+
+
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data="admin:add_cat", style="primary")],
         [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories", style="success")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin:users", style="success")],
+        [InlineKeyboardButton(text="💳 To'lov sozlamalari", callback_data="admin:payment_settings", style="success")],
         [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos", style="success")],
         [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin:broadcast", style="success")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="admin:stats", style="success")],
@@ -579,3 +597,259 @@ async def stats_menu(callback: CallbackQuery):
     ])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+# ---------- BALANS TO'LDIRISHNI TASDIQLASH/RAD ETISH ----------
+@router.callback_query(F.data.startswith("topup_ok:"))
+async def topup_approve(callback: CallbackQuery, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        return
+    topup_id = int(callback.data.split(":")[1])
+    topup = db.get_topup(topup_id)
+
+    if not topup or topup["status"] != "pending":
+        await callback.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
+        return
+
+    new_balance = db.add_balance(topup["user_id"], topup["amount"])
+    db.set_topup_status(topup_id, "approved")
+
+    await callback.message.edit_caption(
+        caption=callback.message.caption + "\n\n✅ TASDIQLANDI",
+        reply_markup=None
+    )
+    await callback.answer("Tasdiqlandi ✅")
+
+    await bot.send_message(
+        topup["user_id"],
+        f"✅ Balansingiz {topup['amount']:,} so'mga to'ldirildi!\n\n".replace(",", " ") +
+        f"💰 Joriy balans: {new_balance:,} so'm".replace(",", " ")
+    )
+
+
+@router.callback_query(F.data.startswith("topup_no:"))
+async def topup_decline(callback: CallbackQuery, bot: Bot):
+    if not is_admin(callback.from_user.id):
+        return
+    topup_id = int(callback.data.split(":")[1])
+    topup = db.get_topup(topup_id)
+
+    if not topup or topup["status"] != "pending":
+        await callback.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
+        return
+
+    db.set_topup_status(topup_id, "declined")
+
+    await callback.message.edit_caption(
+        caption=callback.message.caption + "\n\n❌ RAD ETILDI",
+        reply_markup=None
+    )
+    await callback.answer("Rad etildi")
+
+    await bot.send_message(topup["user_id"], "⚠️ To'lovingiz bekor qilindi.")
+
+
+# ---------- FOYDALANUVCHILARNI BOSHQARISH ----------
+@router.callback_query(F.data == "admin:users")
+async def users_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    user_count = db.get_user_count()
+    await state.set_state(FindUser.waiting_id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")]
+    ])
+    await callback.message.edit_text(
+        f"👥 Jami foydalanuvchilar: {user_count}\n\n"
+        "⭐ Kerakli foydalanuvchining ID raqamini kiriting:",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(FindUser.waiting_id)
+async def users_find(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat ID raqamini kiriting.")
+        return
+
+    user_id = int(message.text.strip())
+    user = db.get_user(user_id)
+    await state.clear()
+
+    if not user:
+        await message.answer("❌ Bunday foydalanuvchi topilmadi.", reply_markup=admin_menu_kb())
+        return
+
+    await show_user_card(message, user_id)
+
+
+async def show_user_card(message: Message, user_id: int):
+    user = db.get_user(user_id)
+    blocked_status = "🔴 Bloklangan" if user["blocked"] else "🟢 Faol"
+    username_line = f"💬 Username: @{user['username']}" if user["username"] else "💬 Username: -"
+    text = (
+        "👤 <b>Foydalanuvchi topildi!</b>\n\n"
+        f"🆔 ID: {user['user_id']}\n"
+        f"📱 Telefon: {user['phone'] or '-'}\n"
+        f"👤 Ism: {user['full_name'] or '-'}\n"
+        f"{username_line}\n"
+        f"💰 Balans: {user['balance']:,} so'm\n".replace(",", " ") +
+        f"Holat: {blocked_status}"
+    )
+    block_text = "🔓 Blokdan chiqarish" if user["blocked"] else "🚫 Bloklash"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Pul qo'shish", callback_data=f"admin:addbal:{user_id}", style="success"),
+            InlineKeyboardButton(text="➖ Pul ayirish", callback_data=f"admin:subbal:{user_id}", style="danger"),
+        ],
+        [InlineKeyboardButton(text=block_text, callback_data=f"admin:toggleblock:{user_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+    ])
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("admin:toggleblock:"))
+async def toggle_block_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    user_id = int(callback.data.split(":")[2])
+    user = db.get_user(user_id)
+    db.set_blocked(user_id, not user["blocked"])
+    await callback.answer("Holat yangilandi ✅", show_alert=True)
+    await show_user_card(callback.message, user_id)
+
+
+@router.callback_query(F.data.startswith("admin:addbal:"))
+async def add_balance_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    user_id = int(callback.data.split(":")[2])
+    await state.update_data(user_id=user_id, mode="add")
+    await state.set_state(AdjustBalance.amount)
+    await callback.message.edit_text("Qo'shiladigan summani kiriting (so'mda):")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:subbal:"))
+async def sub_balance_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    user_id = int(callback.data.split(":")[2])
+    await state.update_data(user_id=user_id, mode="subtract")
+    await state.set_state(AdjustBalance.amount)
+    await callback.message.edit_text("Ayiriladigan summani kiriting (so'mda):")
+    await callback.answer()
+
+
+@router.message(AdjustBalance.amount)
+async def adjust_balance_finish(message: Message, state: FSMContext, bot: Bot):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+
+    data = await state.get_data()
+    user_id, mode = data["user_id"], data["mode"]
+    amount = int(message.text.strip())
+    delta = amount if mode == "add" else -amount
+    new_balance = db.add_balance(user_id, delta)
+    await state.clear()
+
+    await message.answer(
+        f"✅ Balans yangilandi. Yangi balans: {new_balance:,} so'm".replace(",", " "),
+        reply_markup=admin_menu_kb()
+    )
+
+    try:
+        if mode == "add":
+            await bot.send_message(user_id, f"💰 Balansingizga {amount:,} so'm qo'shildi.".replace(",", " "))
+        else:
+            await bot.send_message(user_id, f"💰 Balansingizdan {amount:,} so'm ayirildi.".replace(",", " "))
+    except Exception:
+        pass
+
+
+# ---------- TO'LOV SOZLAMALARI ----------
+@router.callback_query(F.data == "admin:payment_settings")
+async def payment_settings_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    card_number = db.get_setting("payment_card_number")
+    card_owner = db.get_setting("payment_card_owner")
+    min_amount = db.get_setting("payment_min_amount")
+
+    text = (
+        "💳 <b>To'lov sozlamalari</b>\n\n"
+        f"Karta raqami: {card_number}\n"
+        f"Karta egasi: {card_owner}\n"
+        f"Minimal summa: {min_amount} so'm"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Karta raqami", callback_data="admin:set_card_number")],
+        [InlineKeyboardButton(text="✏️ Karta egasi", callback_data="admin:set_card_owner")],
+        [InlineKeyboardButton(text="✏️ Minimal summa", callback_data="admin:set_min_amount")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:set_card_number")
+async def set_card_number_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(PaymentSettings.card_number)
+    await callback.message.edit_text("Yangi karta raqamini kiriting:")
+    await callback.answer()
+
+
+@router.message(PaymentSettings.card_number)
+async def set_card_number_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    db.set_setting("payment_card_number", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Karta raqami yangilandi.", reply_markup=admin_menu_kb())
+
+
+@router.callback_query(F.data == "admin:set_card_owner")
+async def set_card_owner_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(PaymentSettings.card_owner)
+    await callback.message.edit_text("Karta egasining F.I.SH kiriting:")
+    await callback.answer()
+
+
+@router.message(PaymentSettings.card_owner)
+async def set_card_owner_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    db.set_setting("payment_card_owner", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Karta egasi yangilandi.", reply_markup=admin_menu_kb())
+
+
+@router.callback_query(F.data == "admin:set_min_amount")
+async def set_min_amount_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(PaymentSettings.min_amount)
+    await callback.message.edit_text("Minimal to'ldirish summasini kiriting (so'mda):")
+    await callback.answer()
+
+
+@router.message(PaymentSettings.min_amount)
+async def set_min_amount_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    db.set_setting("payment_min_amount", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Minimal summa yangilandi.", reply_markup=admin_menu_kb())
