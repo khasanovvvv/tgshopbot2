@@ -396,9 +396,7 @@ async def promo_check(message: Message, state: FSMContext):
 async def make_order(callback: CallbackQuery, bot: Bot):
     item_id = int(callback.data.split(":")[1])
     item = db.get_item(item_id)
-    await send_order_notification(bot, callback.from_user, item, item["price"], None)
-    await callback.answer("Buyurtmangiz qabul qilindi!", show_alert=False)
-    await send_order_confirmation(bot, callback.from_user.id, item, item["price"])
+    await process_order(callback, bot, item, item["price"], None)
 
 
 # ---------- BUYURTMA BERISH (PROMOKOD BILAN) ----------
@@ -409,10 +407,30 @@ async def make_order_promo(callback: CallbackQuery, bot: Bot):
     item = db.get_item(item_id)
     promo = db.get_promocode(code)
     final_price = max(0, item["price"] - promo["discount"]) if promo else item["price"]
+    await process_order(callback, bot, item, final_price, code)
 
-    await send_order_notification(bot, callback.from_user, item, final_price, code)
+
+async def process_order(callback: CallbackQuery, bot: Bot, item, final_price: int, promo_code):
+    user = callback.from_user
+    balance = db.get_balance(user.id)
+
+    if balance < final_price:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")]
+        ])
+        await callback.message.edit_text(
+            f"❌ Balansingiz yetarli emas.\n\n"
+            f"Kerak: {final_price:,} so'm\n".replace(",", " ") +
+            f"Sizda: {balance:,} so'm".replace(",", " "),
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    db.add_balance(user.id, -final_price)
+    await send_order_notification(bot, user, item, final_price, promo_code)
     await callback.answer("Buyurtmangiz qabul qilindi!", show_alert=False)
-    await send_order_confirmation(bot, callback.from_user.id, item, final_price)
+    await send_order_confirmation(bot, user.id, item, final_price)
 
 
 async def send_order_notification(bot: Bot, user, item, final_price: int, promo_code):
@@ -424,7 +442,8 @@ async def send_order_notification(bot: Bot, user, item, final_price: int, promo_
         f"👤 Foydalanuvchi: {user.full_name} ({username_part})\n"
         f"🆔 ID: {user.id}\n\n"
         f"📦 Xizmat: {item['name']}\n"
-        f"💵 Narxi: {final_price:,} so'm".replace(",", " ")
+        f"💵 Narxi: {final_price:,} so'm".replace(",", " ") +
+        "\n💰 Balansdan avtomatik yechildi."
     )
     if promo_code:
         text += f"\n🎟 Promokod: {promo_code}"
