@@ -86,10 +86,16 @@ class SearchPanelServices(StatesGroup):
 class AddSmmService(StatesGroup):
     platform_id = State()
     panel_service_id = State()
+    confirm_info = State()
     name = State()
     price = State()
     min_qty = State()
     max_qty = State()
+
+
+class RequiredChannel(StatesGroup):
+    username = State()
+    url = State()
 
 
 # ---------- ADMIN ASOSIY MENYU ----------
@@ -100,6 +106,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin:users", style="success")],
         [InlineKeyboardButton(text="📈 Nakrutka xizmatlari", callback_data="admin:smm", style="success")],
         [InlineKeyboardButton(text="💳 To'lov sozlamalari", callback_data="admin:payment_settings", style="success")],
+        [InlineKeyboardButton(text="🔒 Majburiy obuna", callback_data="admin:required_channel", style="success")],
         [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos", style="success")],
         [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin:broadcast", style="success")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="admin:stats", style="success")],
@@ -1048,9 +1055,90 @@ async def add_smm_service_id(message: Message, state: FSMContext):
     if not message.text.strip().isdigit():
         await message.answer("❗️ Iltimos, faqat raqam kiriting.")
         return
-    await state.update_data(panel_service_id=int(message.text.strip()))
+
+    panel_id = int(message.text.strip())
+    await message.answer("⏳ Xizmat ma'lumoti tekshirilmoqda...")
+
+    result = smm_api.get_services()
+    if not isinstance(result, list):
+        error = result.get("error") if isinstance(result, dict) else "Noma'lum xatolik"
+        await state.clear()
+        await message.answer(f"❌ Panel bilan bog'lanishda xatolik: {error}", reply_markup=admin_menu_kb())
+        return
+
+    service_info = next((s for s in result if str(s.get("service")) == str(panel_id)), None)
+    if not service_info:
+        await message.answer(
+            "❌ Bunday ID raqamli xizmat panelda topilmadi. Qaytadan kiriting, "
+            "yoki avval «🔍 Panel xizmatlarini qidirish» orqali to'g'ri ID'ni toping:"
+        )
+        return
+
+    # xpanel qaytargan ma'lumotlarni skrindagi uslubda ko'rsatamiz
+    name = service_info.get("name", "-")
+    rate = service_info.get("rate", "-")
+    min_qty = service_info.get("min", "-")
+    max_qty = service_info.get("max", "-")
+    avg_time = service_info.get("average_time") or service_info.get("time") or service_info.get("eta")
+
+    text = (
+        f"📦 {name}\n\n"
+        f"🔑 Xizmat IDsi: {panel_id}\n"
+        f"📊 Narxi (1000x): {rate}\n"
+    )
+    if avg_time:
+        text += f"⏰ Bajarilish vaqti: {avg_time}\n"
+    text += (
+        f"\n🔽 Minimal buyurtma: {min_qty} ta\n"
+        f"🔼 Maksimal buyurtma: {max_qty} ta"
+    )
+
+    await state.update_data(panel_service_id=panel_id, panel_name=name)
+    await state.set_state(AddSmmService.confirm_info)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Qo'shish", callback_data="admin:confirm_smm_add", style="success")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin:main", style="danger")],
+    ])
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "admin:confirm_smm_add", AddSmmService.confirm_info)
+async def confirm_smm_add(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    data = await state.get_data()
+    suggested_name = data.get("panel_name", "")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, shu nom qolsin", callback_data="admin:keep_panel_name", style="success")],
+        [InlineKeyboardButton(text="✏️ Yo'q, o'zim yozaman", callback_data="admin:type_own_name", style="primary")],
+    ])
+    await callback.message.edit_text(
+        f"📦 Xpanel'dagi nomi: <b>{suggested_name}</b>\n\n"
+        "Shu nom mijozlarga shu holicha ko'rsatilsinmi?",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:keep_panel_name", AddSmmService.confirm_info)
+async def keep_panel_name(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    data = await state.get_data()
+    await state.update_data(name=data.get("panel_name", ""))
+    await state.set_state(AddSmmService.price)
+    await callback.message.edit_text("1000 dona uchun sotish narxini kiriting (so'mda):")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:type_own_name", AddSmmService.confirm_info)
+async def type_own_name(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
     await state.set_state(AddSmmService.name)
-    await message.answer("Xizmat nomini kiriting (mijozlarga shu nom ko'rinadi):")
+    await callback.message.edit_text("Xizmat nomini kiriting (mijozlarga shu nom ko'rinadi):")
+    await callback.answer()
 
 
 @router.message(AddSmmService.name)
@@ -1101,3 +1189,86 @@ async def add_smm_service_max(message: Message, state: FSMContext):
     )
     await state.clear()
     await message.answer(f"✅ «{data['name']}» xizmati qo'shildi.", reply_markup=admin_menu_kb())
+
+
+# ---------- MAJBURIY OBUNA SOZLAMALARI ----------
+@router.callback_query(F.data == "admin:required_channel")
+async def required_channel_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    enabled = db.get_setting("require_channel_enabled") == "1"
+    username = db.get_setting("require_channel_username") or "-"
+    url = db.get_setting("require_channel_url") or "-"
+
+    status_text = "✅ Yoqilgan" if enabled else "❌ O'chirilgan"
+    toggle_text = "🔴 O'chirish" if enabled else "🟢 Yoqish"
+
+    text = (
+        "🔒 <b>Majburiy obuna</b>\n\n"
+        f"Holati: {status_text}\n"
+        f"Kanal username: {username}\n"
+        f"Kanal link: {url}\n\n"
+        "⚠️ Yoqishdan oldin botni o'sha kanalga <b>admin</b> qilib qo'yganingizga ishonch hosil qiling, "
+        "aks holda obunani tekshira olmaydi."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data="admin:toggle_required_channel", style="danger" if enabled else "success")],
+        [InlineKeyboardButton(text="✏️ Kanal username", callback_data="admin:set_req_channel_username")],
+        [InlineKeyboardButton(text="✏️ Kanal link", callback_data="admin:set_req_channel_url")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:toggle_required_channel")
+async def toggle_required_channel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    enabled = db.get_setting("require_channel_enabled") == "1"
+    if not enabled and not db.get_setting("require_channel_username"):
+        await callback.answer("❗️ Avval kanal username'ni kiriting.", show_alert=True)
+        return
+    db.set_setting("require_channel_enabled", "0" if enabled else "1")
+    await callback.answer("Holat yangilandi ✅")
+    await required_channel_menu(callback)
+
+
+@router.callback_query(F.data == "admin:set_req_channel_username")
+async def set_req_channel_username_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(RequiredChannel.username)
+    await callback.message.edit_text(
+        "Kanal username'ni kiriting (masalan: @mychannel):"
+    )
+    await callback.answer()
+
+
+@router.message(RequiredChannel.username)
+async def set_req_channel_username_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    db.set_setting("require_channel_username", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Kanal username saqlandi.", reply_markup=admin_menu_kb())
+
+
+@router.callback_query(F.data == "admin:set_req_channel_url")
+async def set_req_channel_url_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(RequiredChannel.url)
+    await callback.message.edit_text(
+        "Kanalga o'tish uchun havolani kiriting (masalan: https://t.me/mychannel):"
+    )
+    await callback.answer()
+
+
+@router.message(RequiredChannel.url)
+async def set_req_channel_url_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    db.set_setting("require_channel_url", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Kanal link saqlandi.", reply_markup=admin_menu_kb())
