@@ -4,7 +4,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -97,23 +97,96 @@ def phone_request_kb() -> ReplyKeyboardMarkup:
     )
 
 
+# ---------- MAJBURIY OBUNA ----------
+async def is_subscribed(bot: Bot, user_id: int) -> bool:
+    enabled = db.get_setting("require_channel_enabled")
+    if enabled != "1":
+        return True
+    channel = db.get_setting("require_channel_username")
+    if not channel:
+        return True
+    try:
+        member = await bot.get_chat_member(channel, user_id)
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
+        return True  # bot admin emas yoki xato bo'lsa, botni bloklab qo'ymaymiz
+
+
+def subscribe_kb() -> InlineKeyboardMarkup:
+    channel_url = db.get_setting("require_channel_url") or "https://t.me"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Kanalga o'tish", url=channel_url, style="primary")],
+        [InlineKeyboardButton(text="✅ Tekshirdim", callback_data="check_subscription", style="success")],
+    ])
+
+
+SUBSCRIBE_TEXT = "🔒 Botdan foydalanish uchun avval kanalimizga a'zo bo'ling, so'ng «✅ Tekshirdim» tugmasini bosing."
+
+
+class SubscriptionMiddleware:
+    """Har bir tugma bosilganda (callback_query) majburiy obunani tekshiradi."""
+    async def __call__(self, handler, event: CallbackQuery, data):
+        if event.data == "check_subscription":
+            return await handler(event, data)
+        bot: Bot = data["bot"]
+        if not await is_subscribed(bot, event.from_user.id):
+            await event.answer()
+            await event.message.answer(SUBSCRIBE_TEXT, reply_markup=subscribe_kb())
+            return
+        return await handler(event, data)
+
+
+router.callback_query.middleware(SubscriptionMiddleware())
+
+
+@router.callback_query(F.data == "check_subscription")
+async def check_subscription_cb(callback: CallbackQuery, bot: Bot):
+    if await is_subscribed(bot, callback.from_user.id):
+        await callback.message.delete()
+        await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+    else:
+        await callback.answer("❗️ Hali kanalga a'zo bo'lmagansiz.", show_alert=True)
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, command: CommandObject, state: FSMContext, bot: Bot):
     db.add_user(message.from_user.id)
 
     if db.is_blocked(message.from_user.id):
         await message.answer("⛔️ Siz botdan foydalanish huquqidan mahrum qilingansiz.")
         return
 
+    if command.args:
+        await state.update_data(pending_start=command.args)
+
     if not db.has_phone(message.from_user.id):
         await message.answer(PHONE_REQUEST_TEXT, reply_markup=phone_request_kb())
         return
+
+    if not await is_subscribed(bot, message.from_user.id):
+        await message.answer(SUBSCRIBE_TEXT, reply_markup=subscribe_kb())
+        return
+
+    await open_start_target(message, state)
+
+
+async def open_start_target(message: Message, state: FSMContext):
+    """Agar deep-link orqali kirilgan bo'lsa (masalan ulashilgan xizmat), to'g'ridan-to'g'ri o'sha yerga olib boradi."""
+    data = await state.get_data()
+    payload = data.get("pending_start")
+    if payload:
+        await state.update_data(pending_start=None)
+        if payload.startswith("smmservice_"):
+            service_id = payload.replace("smmservice_", "")
+            if service_id.isdigit():
+                await send_smm_service_card(message, int(service_id))
+                return
 
     await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
 
 
 @router.message(F.contact)
-async def contact_received(message: Message):
+async def contact_received(message: Message, state: FSMContext, bot: Bot):
     if message.contact.user_id != message.from_user.id:
         await message.answer("❗️ Iltimos, faqat o'zingizning raqamingizni yuboring.")
         return
@@ -125,7 +198,12 @@ async def contact_received(message: Message):
         username=message.from_user.username
     )
     await message.answer("✅ Raqamingiz tasdiqlandi!", reply_markup=ReplyKeyboardRemove())
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+
+    if not await is_subscribed(bot, message.from_user.id):
+        await message.answer(SUBSCRIBE_TEXT, reply_markup=subscribe_kb())
+        return
+
+    await open_start_target(message, state)
 
 
 @router.callback_query(F.data == "menu:main")
@@ -526,20 +604,38 @@ async def show_smm_services(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("smmservice:"))
-async def smm_service_info(callback: CallbackQuery, state: FSMContext):
-    service_id = int(callback.data.split(":")[1])
-    service = db.get_smm_service(service_id)
-
+def build_smm_service_card(service, bot_username: str):
     text = (
         f"📦 {service['name']}\n\n"
         f"💵 Narxi: {service['price_per_1000']:,} so'm / 1000 dona\n".replace(",", " ") +
-        f"🔢 Minimal: {service['min_qty']} — Maksimal: {service['max_qty']}"
+        f"🔽 Minimal: {service['min_qty']} — 🔼 Maksimal: {service['max_qty']}"
     )
+    share_link = f"https://t.me/{bot_username}?start=smmservice_{service['id']}"
+    share_url = f"https://t.me/share/url?url={share_link}&text={service['name']}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Buyurtma berish", callback_data=f"smmorder:{service_id}", style="success")],
+        [InlineKeyboardButton(text="↗️ Ulashish", url=share_url)],
+        [InlineKeyboardButton(text="✅ Buyurtma berish", callback_data=f"smmorder:{service['id']}", style="success")],
         [back_button(f"smmcat:{service['platform_id']}")],
     ])
+    return text, kb
+
+
+async def send_smm_service_card(message: Message, service_id: int, bot: Bot = None):
+    service = db.get_smm_service(service_id)
+    if not service:
+        await message.answer("❌ Bunday xizmat topilmadi.", reply_markup=main_menu_kb())
+        return
+    me = await message.bot.get_me()
+    text, kb = build_smm_service_card(service, me.username)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("smmservice:"))
+async def smm_service_info(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    service_id = int(callback.data.split(":")[1])
+    service = db.get_smm_service(service_id)
+    me = await bot.get_me()
+    text, kb = build_smm_service_card(service, me.username)
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
