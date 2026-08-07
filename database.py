@@ -59,6 +59,18 @@ def init_db():
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("require_channel_enabled", "0")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("require_channel_username", "")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("require_channel_url", "")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
         ("channel_url", "https://t.me/your_channel")
     )
     default_emojis = {
