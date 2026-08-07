@@ -5,8 +5,11 @@ import os
 # Agar topilmasa, quyidagi standart qiymatlar ishlatiladi (lokal sinov uchun).
 # RAILWAYDA BU YERGA HAQIQIY TOKEN YOZMANG — Variables bo'limidan kiriting.
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", ""))
+BOT_TOKEN = os.getenv("BOT_TOKEN", "123456789:AAExampleTokenHereReplaceMe")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
+
+# Faqat admin uchun alohida bot (yangi @BotFather'dan olingan token)
+ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "")
 
 # 1xpanel (SMM/nakrutka xizmatlari) API - Render'ning Environment Variables
 # bo'limidan kiritiladi, GitHub'ga hech qachon yozilmaydi.
