@@ -54,26 +54,49 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, ADMIN_BOT_TOKEN
 import database as db
 import handlers_user
 import handlers_admin
+import admin_bot
+
+
+async def run_customer_bot(include_admin_router: bool):
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp = Dispatcher(storage=MemoryStorage())
+
+    # Agar alohida admin bot ishlamasa, /admin shu botning o'zida ham ishlaydi
+    # (zaxira variant sifatida). Aks holda admin faqat maxsus botdan boshqaradi.
+    if include_admin_router:
+        dp.include_router(handlers_admin.router)
+    dp.include_router(handlers_user.router)
+
+    await bot.delete_webhook(drop_pending_updates=True)
+    log.info("Mijozlar boti (asosiy bot) polling boshlandi.")
+    await dp.start_polling(bot)
+
+
+async def run_admin_bot():
+    bot = Bot(token=ADMIN_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp = Dispatcher(storage=MemoryStorage())
+
+    dp.include_router(admin_bot.router)
+    dp.include_router(handlers_admin.router)
+
+    await bot.delete_webhook(drop_pending_updates=True)
+    log.info("Admin boti polling boshlandi.")
+    await dp.start_polling(bot)
 
 
 async def main():
     db.init_db()
 
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher(storage=MemoryStorage())
-
-    # admin handlerlar user handlerlardan OLDIN ro'yxatdan o'tishi kerak,
-    # aks holda callback_data mos kelib qolishi mumkin
-    dp.include_router(handlers_admin.router)
-    dp.include_router(handlers_user.router)
-
-    await bot.delete_webhook(drop_pending_updates=True)
-    log.info("Bot polling boshlandi.")
-    await dp.start_polling(bot)
+    if ADMIN_BOT_TOKEN:
+        # Ikkala bot ham ishlaydi: mijozlar boti (admin routerisiz) + alohida admin bot
+        await asyncio.gather(run_customer_bot(include_admin_router=False), run_admin_bot())
+    else:
+        log.info("ADMIN_BOT_TOKEN berilmagan - faqat asosiy bot ishga tushadi (unda /admin ham ishlaydi).")
+        await run_customer_bot(include_admin_router=True)
 
 
 if __name__ == "__main__":
