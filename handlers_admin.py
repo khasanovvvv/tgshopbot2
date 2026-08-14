@@ -1164,10 +1164,119 @@ async def add_smm_service_start(callback: CallbackQuery, state: FSMContext):
     platform_id = int(callback.data.split(":")[2])
     await state.update_data(platform_id=platform_id)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔢 ID orqali kiritish", callback_data="admin:smm_by_id", style="primary")],
+        [InlineKeyboardButton(text="📂 Kategoriyalar orqali ko'rish", callback_data="admin:smm_by_category", style="primary")],
         [InlineKeyboardButton(text="🔍 Nomi orqali qidirish", callback_data="admin:smm_by_search", style="primary")],
+        [InlineKeyboardButton(text="🔢 ID orqali kiritish", callback_data="admin:smm_by_id")],
     ])
     await callback.message.edit_text("Xizmatni qanday qo'shmoqchisiz?", reply_markup=kb)
+    await callback.answer()
+
+
+# ---------- KATEGORIYALAR ORQALI KO'RISH (xpanel'dagidek) ----------
+PAGE_SIZE = 10
+
+
+@router.callback_query(F.data == "admin:smm_by_category")
+async def smm_by_category_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await callback.message.edit_text("⏳ Kategoriyalar yuklanmoqda...")
+    result = smm_api.get_services()
+
+    if not isinstance(result, list):
+        error = result.get("error") if isinstance(result, dict) else "Noma'lum xatolik"
+        await callback.message.edit_text(f"❌ Panel bilan bog'lanishda xatolik: {error}", reply_markup=admin_menu_kb())
+        await callback.answer()
+        return
+
+    categories = sorted(set(s.get("category", "Boshqa") or "Boshqa" for s in result))
+    await state.update_data(smm_categories=categories, smm_all_services=result)
+    await show_category_list(callback, state, page=0)
+    await callback.answer()
+
+
+async def show_category_list(callback: CallbackQuery, state: FSMContext, page: int):
+    data = await state.get_data()
+    categories = data.get("smm_categories", [])
+    start = page * PAGE_SIZE
+    chunk = categories[start:start + PAGE_SIZE]
+
+    buttons = [
+        [InlineKeyboardButton(text=cat[:60], callback_data=f"admin:cat_pick:{start + i}")]
+        for i, cat in enumerate(chunk)
+    ]
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"admin:cat_page:{page - 1}"))
+    if start + PAGE_SIZE < len(categories):
+        nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"admin:cat_page:{page + 1}"))
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
+
+    text = f"📂 Kategoriyani tanlang ({len(categories)} ta):"
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("admin:cat_page:"))
+async def cat_page_nav(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    page = int(callback.data.split(":")[2])
+    await show_category_list(callback, state, page)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:cat_pick:"))
+async def cat_pick(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    idx = int(callback.data.split(":")[2])
+    data = await state.get_data()
+    categories = data.get("smm_categories", [])
+    if idx >= len(categories):
+        await callback.answer("Xato, qaytadan urinib ko'ring.", show_alert=True)
+        return
+    await state.update_data(current_category=categories[idx])
+    await show_service_list(callback, state, page=0)
+    await callback.answer()
+
+
+async def show_service_list(callback: CallbackQuery, state: FSMContext, page: int):
+    data = await state.get_data()
+    all_services = data.get("smm_all_services", [])
+    category = data.get("current_category", "")
+    services = [s for s in all_services if (s.get("category") or "Boshqa") == category]
+
+    start = page * PAGE_SIZE
+    chunk = services[start:start + PAGE_SIZE]
+
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"{s.get('name', '')[:45]} (ID {s.get('service')})",
+            callback_data=f"admin:pick_smm:{s.get('service')}"
+        )]
+        for s in chunk
+    ]
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Oldingi", callback_data=f"admin:svc_page:{page - 1}"))
+    if start + PAGE_SIZE < len(services):
+        nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"admin:svc_page:{page + 1}"))
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="🔙 Kategoriyalarga qaytish", callback_data="admin:smm_by_category")])
+
+    text = f"📂 {category}\n\nXizmatlar ({len(services)} ta):"
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("admin:svc_page:"))
+async def svc_page_nav(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    page = int(callback.data.split(":")[2])
+    await show_service_list(callback, state, page)
     await callback.answer()
 
 
