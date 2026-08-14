@@ -71,6 +71,14 @@ def init_db():
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("dollar_rate", "12700")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("smm_default_markup", "100")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
         ("channel_url", "https://t.me/your_channel")
     )
     default_emojis = {
@@ -158,9 +166,11 @@ def init_db():
             name TEXT NOT NULL,
             price_per_1000 INTEGER NOT NULL,
             min_qty INTEGER NOT NULL,
-            max_qty INTEGER NOT NULL
+            max_qty INTEGER NOT NULL,
+            average_time TEXT DEFAULT ''
         )
     """)
+    cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS average_time TEXT DEFAULT ''")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS smm_orders (
             id SERIAL PRIMARY KEY,
@@ -601,14 +611,14 @@ def delete_platform(platform_id: int):
 
 # ---------- SMM XIZMATLAR ----------
 def add_smm_service(platform_id: int, panel_service_id: int, name: str,
-                     price_per_1000: int, min_qty: int, max_qty: int) -> int:
+                     price_per_1000: int, min_qty: int, max_qty: int, average_time: str = "") -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         """INSERT INTO smm_services
-           (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty)
-           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-        (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty)
+           (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty, average_time)
+           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty, average_time)
     )
     new_id = cur.fetchone()["id"]
     conn.commit()
