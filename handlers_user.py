@@ -573,15 +573,44 @@ async def show_platforms(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("smmcat:"))
-async def show_smm_services(callback: CallbackQuery):
+async def show_smm_categories(callback: CallbackQuery):
     platform_id = int(callback.data.split(":")[1])
     platform = db.get_platform(platform_id)
-    services = db.get_smm_services_by_platform(platform_id)
+    categories = db.get_smm_categories(platform_id)
 
-    if not services:
+    if not categories:
         kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:smm")]])
         await callback.message.edit_text(
-            f"«{platform['name']}» uchun hozircha xizmatlar yo'q.",
+            f"«{platform['name']}» uchun hozircha kategoriya yo'q.",
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    buttons = [
+        [InlineKeyboardButton(text=f"📂 {c['name']}", callback_data=f"smmsubcat:{c['id']}", style="success")]
+        for c in categories
+    ]
+    buttons.append([back_button("menu:smm")])
+
+    await callback.message.edit_text(
+        f"{platform['emoji']} {platform['name']} — kategoriyani tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("smmsubcat:"))
+async def show_smm_services(callback: CallbackQuery):
+    category_id = int(callback.data.split(":")[1])
+    category = db.get_smm_category(category_id)
+    platform = db.get_platform(category["platform_id"])
+    services = db.get_smm_services_by_category(category_id)
+
+    if not services:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button(f"smmcat:{category['platform_id']}")]])
+        await callback.message.edit_text(
+            f"«{category['name']}» uchun hozircha xizmatlar yo'q.",
             reply_markup=kb
         )
         await callback.answer()
@@ -595,10 +624,10 @@ async def show_smm_services(callback: CallbackQuery):
         )]
         for s in services
     ]
-    buttons.append([back_button("menu:smm")])
+    buttons.append([back_button(f"smmcat:{category['platform_id']}")])
 
     await callback.message.edit_text(
-        f"{platform['emoji']} {platform['name']} xizmatlari:",
+        f"{platform['emoji']} {platform['name']} / 📂 {category['name']}:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
     await callback.answer()
@@ -610,12 +639,14 @@ def build_smm_service_card(service, bot_username: str):
         f"💵 Narxi: {service['price_per_1000']:,} so'm / 1000 dona\n".replace(",", " ") +
         f"🔽 Minimal: {service['min_qty']} — 🔼 Maksimal: {service['max_qty']}"
     )
+    if service["average_time"]:
+        text += f"\n⏰ Bajarilish vaqti: {service['average_time']}"
     share_link = f"https://t.me/{bot_username}?start=smmservice_{service['id']}"
     share_url = f"https://t.me/share/url?url={share_link}&text={service['name']}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↗️ Ulashish", url=share_url)],
         [InlineKeyboardButton(text="✅ Buyurtma berish", callback_data=f"smmorder:{service['id']}", style="success")],
-        [back_button(f"smmcat:{service['platform_id']}")],
+        [back_button(f"smmsubcat:{service['category_id']}")],
     ])
     return text, kb
 
