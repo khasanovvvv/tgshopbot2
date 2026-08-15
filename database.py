@@ -148,6 +148,12 @@ def init_db():
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT DEFAULT 'item'")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'yangi'")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS item_name TEXT")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS link TEXT")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INTEGER")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS panel_order_id INTEGER")
 
     # ---- NAKRUTKA (SMM) XIZMATLARI ----
     cur.execute("""
@@ -334,13 +340,49 @@ def set_topup_status(topup_id: int, status: str):
 
 
 # ---------- BUYURTMALAR (statistika uchun) ----------
-def log_order(item_id: int, user_id: int, price: int, promo_code: str = None):
+def log_order(item_id: int, user_id: int, price: int, promo_code: str = None,
+              order_type: str = "item", item_name: str = None,
+              link: str = None, quantity: int = None, panel_order_id: int = None) -> int:
+    """Buyurtmani saqlaydi va uning ketma-ket raqamini (id) qaytaradi."""
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO orders (item_id, user_id, price, promo_code) VALUES (%s, %s, %s, %s)",
-        (item_id, user_id, price, promo_code)
+        """INSERT INTO orders
+           (item_id, user_id, price, promo_code, order_type, item_name, link, quantity, panel_order_id, status)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'yangi') RETURNING id""",
+        (item_id, user_id, price, promo_code, order_type, item_name, link, quantity, panel_order_id)
     )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    release(conn)
+    return new_id
+
+
+def get_order(order_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM orders WHERE id = %s", (order_id,))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
+def get_user_orders(user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM orders WHERE user_id = %s ORDER BY id DESC", (user_id,))
+    rows = cur.fetchall()
+    cur.close()
+    release(conn)
+    return rows
+
+
+def set_order_status(order_id: int, status: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE orders SET status = %s WHERE id = %s", (status, order_id))
     conn.commit()
     cur.close()
     release(conn)
