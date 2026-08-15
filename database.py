@@ -159,9 +159,17 @@ def init_db():
         )
     """)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS smm_services (
+        CREATE TABLE IF NOT EXISTS smm_categories (
             id SERIAL PRIMARY KEY,
             platform_id INTEGER NOT NULL REFERENCES smm_platforms(id),
+            name TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS smm_services (
+            id SERIAL PRIMARY KEY,
+            category_id INTEGER REFERENCES smm_categories(id),
             panel_service_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             price_per_1000 INTEGER NOT NULL,
@@ -171,6 +179,7 @@ def init_db():
         )
     """)
     cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS average_time TEXT DEFAULT ''")
+    cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES smm_categories(id)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS smm_orders (
             id SERIAL PRIMARY KEY,
@@ -602,23 +611,29 @@ def get_platform(platform_id: int):
 def delete_platform(platform_id: int):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM smm_services WHERE platform_id = %s", (platform_id,))
+    cur.execute("SELECT id FROM smm_categories WHERE platform_id = %s", (platform_id,))
+    category_ids = [row["id"] for row in cur.fetchall()]
+    for cat_id in category_ids:
+        cur.execute("DELETE FROM smm_services WHERE category_id = %s", (cat_id,))
+    cur.execute("DELETE FROM smm_categories WHERE platform_id = %s", (platform_id,))
     cur.execute("DELETE FROM smm_platforms WHERE id = %s", (platform_id,))
     conn.commit()
     cur.close()
     release(conn)
 
 
-# ---------- SMM XIZMATLAR ----------
-def add_smm_service(platform_id: int, panel_service_id: int, name: str,
-                     price_per_1000: int, min_qty: int, max_qty: int, average_time: str = "") -> int:
+# ---------- SMM KATEGORIYALAR (platforma ichidagi bo'limlar) ----------
+def add_smm_category(platform_id: int, name: str) -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """INSERT INTO smm_services
-           (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty, average_time)
-           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (platform_id, panel_service_id, name, price_per_1000, min_qty, max_qty, average_time)
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM smm_categories WHERE platform_id = %s",
+        (platform_id,)
+    )
+    next_order = cur.fetchone()["n"]
+    cur.execute(
+        "INSERT INTO smm_categories (platform_id, name, sort_order) VALUES (%s, %s, %s) RETURNING id",
+        (platform_id, name, next_order)
     )
     new_id = cur.fetchone()["id"]
     conn.commit()
@@ -627,10 +642,58 @@ def add_smm_service(platform_id: int, panel_service_id: int, name: str,
     return new_id
 
 
-def get_smm_services_by_platform(platform_id: int):
+def get_smm_categories(platform_id: int):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM smm_services WHERE platform_id = %s ORDER BY id", (platform_id,))
+    cur.execute("SELECT * FROM smm_categories WHERE platform_id = %s ORDER BY sort_order", (platform_id,))
+    rows = cur.fetchall()
+    cur.close()
+    release(conn)
+    return rows
+
+
+def get_smm_category(category_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_categories WHERE id = %s", (category_id,))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
+def delete_smm_category(category_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM smm_services WHERE category_id = %s", (category_id,))
+    cur.execute("DELETE FROM smm_categories WHERE id = %s", (category_id,))
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
+# ---------- SMM XIZMATLAR ----------
+def add_smm_service(category_id: int, panel_service_id: int, name: str,
+                     price_per_1000: int, min_qty: int, max_qty: int, average_time: str = "") -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO smm_services
+           (category_id, panel_service_id, name, price_per_1000, min_qty, max_qty, average_time)
+           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (category_id, panel_service_id, name, price_per_1000, min_qty, max_qty, average_time)
+    )
+    new_id = cur.fetchone()["id"]
+    conn.commit()
+    cur.close()
+    release(conn)
+    return new_id
+
+
+def get_smm_services_by_category(category_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_services WHERE category_id = %s ORDER BY id", (category_id,))
     rows = cur.fetchall()
     cur.close()
     release(conn)
