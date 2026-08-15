@@ -946,21 +946,22 @@ async def manage_platform(callback: CallbackQuery):
         return
     platform_id = int(callback.data.split(":")[2])
     platform = db.get_platform(platform_id)
-    services = db.get_smm_services_by_platform(platform_id)
+    categories = db.get_smm_categories(platform_id)
 
-    text = f"{platform['emoji']} <b>{platform['name']}</b>\n\nXizmatlar:\n"
-    if services:
-        for s in services:
-            text += f"• {s['name']} — {s['price_per_1000']:,} so'm/1000\n".replace(",", " ")
+    text = f"{platform['emoji']} <b>{platform['name']}</b>\n\nKategoriyalar:\n"
+    if categories:
+        for c in categories:
+            count = len(db.get_smm_services_by_category(c["id"]))
+            text += f"📂 {c['name']} — {count} ta xizmat\n"
     else:
-        text += "(hozircha yo'q)"
+        text += "(hozircha kategoriya qo'shilmagan)"
 
     buttons = [
-        [InlineKeyboardButton(text="➕ Xizmat qo'shish", callback_data=f"admin:add_smm_service:{platform_id}", style="primary")],
+        [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data=f"admin:add_smm_category:{platform_id}", style="primary")],
     ]
-    for s in services:
+    for c in categories:
         buttons.append([InlineKeyboardButton(
-            text=f"🗑 {s['name']}", callback_data=f"admin:del_smm_service:{s['id']}:{platform_id}", style="danger"
+            text=f"📂 {c['name']}", callback_data=f"admin:smmcategory:{c['id']}", style="success"
         )])
     buttons.append([InlineKeyboardButton(text="🗑 Platformani o'chirish", callback_data=f"admin:del_platform:{platform_id}", style="danger")])
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:smm")])
@@ -979,15 +980,88 @@ async def del_platform_cb(callback: CallbackQuery):
     await smm_menu(callback)
 
 
+# ---------- SMM KATEGORIYALAR (platforma ichidagi bo'limlar) ----------
+class AddSmmCategory(StatesGroup):
+    platform_id = State()
+    name = State()
+
+
+@router.callback_query(F.data.startswith("admin:add_smm_category:"))
+async def add_smm_category_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    platform_id = int(callback.data.split(":")[2])
+    await state.update_data(platform_id=platform_id)
+    await state.set_state(AddSmmCategory.name)
+    await callback.message.edit_text(
+        "Kategoriya nomini kiriting (masalan: A'zolar, Ko'rishlar, Layklar):"
+    )
+    await callback.answer()
+
+
+@router.message(AddSmmCategory.name)
+async def add_smm_category_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    db.add_smm_category(data["platform_id"], message.text.strip())
+    await state.clear()
+    await message.answer(f"✅ «{message.text.strip()}» kategoriyasi qo'shildi.", reply_markup=admin_menu_kb())
+
+
+@router.callback_query(F.data.startswith("admin:smmcategory:"))
+async def manage_smm_category(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    category_id = int(callback.data.split(":")[2])
+    category = db.get_smm_category(category_id)
+    services = db.get_smm_services_by_category(category_id)
+
+    text = f"📂 <b>{category['name']}</b>\n\nXizmatlar:\n"
+    if services:
+        for s in services:
+            text += f"• {s['name']} — {s['price_per_1000']:,} so'm/1000\n".replace(",", " ")
+    else:
+        text += "(hozircha yo'q)"
+
+    buttons = [
+        [InlineKeyboardButton(text="➕ Xizmat qo'shish", callback_data=f"admin:add_smm_service:{category_id}", style="primary")],
+    ]
+    for s in services:
+        buttons.append([InlineKeyboardButton(
+            text=f"🗑 {s['name']}", callback_data=f"admin:del_smm_service:{s['id']}:{category_id}", style="danger"
+        )])
+    buttons.append([InlineKeyboardButton(text="🗑 Kategoriyani o'chirish", callback_data=f"admin:del_smm_category:{category_id}:{category['platform_id']}", style="danger")])
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:platform:{category['platform_id']}")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:del_smm_category:"))
+async def del_smm_category_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    parts = callback.data.split(":")
+    category_id, platform_id = int(parts[2]), int(parts[3])
+    db.delete_smm_category(category_id)
+    await callback.answer("Kategoriya o'chirildi ✅", show_alert=True)
+    fake_data = f"admin:platform:{platform_id}"
+    callback.data = fake_data
+    await manage_platform(callback)
+
+
 @router.callback_query(F.data.startswith("admin:del_smm_service:"))
 async def del_smm_service_cb(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
     parts = callback.data.split(":")
-    service_id, platform_id = int(parts[2]), int(parts[3])
+    service_id, category_id = int(parts[2]), int(parts[3])
     db.delete_smm_service(service_id)
     await callback.answer("Xizmat o'chirildi ✅", show_alert=True)
-    await manage_platform(callback)
+    fake_data = f"admin:smmcategory:{category_id}"
+    callback.data = fake_data
+    await manage_smm_category(callback)
 
 
 # ---------- DOLLAR KURSI VA USTAMA HISOBLASH ----------
@@ -1161,10 +1235,10 @@ async def pick_smm_service(callback: CallbackQuery, state: FSMContext):
 async def add_smm_service_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
-    platform_id = int(callback.data.split(":")[2])
-    await state.update_data(platform_id=platform_id)
+    category_id = int(callback.data.split(":")[2])
+    await state.update_data(category_id=category_id)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📂 Kategoriyalar orqali ko'rish", callback_data="admin:smm_by_category", style="primary")],
+        [InlineKeyboardButton(text="📂 Panel kategoriyalari orqali", callback_data="admin:smm_by_category", style="primary")],
         [InlineKeyboardButton(text="🔍 Nomi orqali qidirish", callback_data="admin:smm_by_search", style="primary")],
         [InlineKeyboardButton(text="🔢 ID orqali kiritish", callback_data="admin:smm_by_id")],
     ])
@@ -1324,7 +1398,7 @@ async def finalize_smm_add(callback: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     db.add_smm_service(
-        data["platform_id"], data["panel_service_id"], data["name"],
+        data["category_id"], data["panel_service_id"], data["name"],
         data["price"], data["min_qty"], data["max_qty"], data.get("average_time", "")
     )
     await state.clear()
