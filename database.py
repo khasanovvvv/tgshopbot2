@@ -180,6 +180,12 @@ def init_db():
     """)
     cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS average_time TEXT DEFAULT ''")
     cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES smm_categories(id)")
+    # eski bazalarda "platform_id" ustuni NOT NULL bo'lib qolgan bo'lishi mumkin -
+    # endi xizmatlar category_id orqali bog'lanadi, shu sababli bu cheklovni olib tashlaymiz
+    try:
+        cur.execute("ALTER TABLE smm_services ALTER COLUMN platform_id DROP NOT NULL")
+    except Exception:
+        conn.rollback()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS smm_orders (
             id SERIAL PRIMARY KEY,
