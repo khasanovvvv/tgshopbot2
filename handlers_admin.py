@@ -7,10 +7,22 @@ from aiogram.fsm.state import State, StatesGroup
 
 import database as db
 import smm_api
-from config import ADMIN_ID
+from config import ADMIN_ID, BOT_TOKEN
 from handlers_user import tge
 
 router = Router()
+
+# ---------- Mijozga xabar yuborish uchun yordamchi ----------
+# Admin botidan turib mijozga (masalan "buyurtma bajarildi") xabar yuborish
+# uchun mijozlar botining o'z tokenidan foydalanamiz.
+_customer_notifier_bot = None
+
+
+def get_customer_bot() -> Bot:
+    global _customer_notifier_bot
+    if _customer_notifier_bot is None:
+        _customer_notifier_bot = Bot(token=BOT_TOKEN)
+    return _customer_notifier_bot
 
 
 def is_admin(user_id: int) -> bool:
@@ -1554,3 +1566,41 @@ async def set_req_channel_url_finish(message: Message, state: FSMContext):
     db.set_setting("require_channel_url", message.text.strip())
     await state.clear()
     await message.answer("✅ Kanal link saqlandi.", reply_markup=admin_menu_kb())
+
+
+# ---------- BUYURTMANI "BAJARILDI" DEB BELGILASH ----------
+@router.callback_query(F.data.startswith("order_done:"))
+async def mark_order_done(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    order_id = int(callback.data.split(":")[1])
+    order = db.get_order(order_id)
+
+    if not order:
+        await callback.answer("Buyurtma topilmadi.", show_alert=True)
+        return
+
+    if order["status"] == "bajarildi":
+        await callback.answer("Bu buyurtma allaqachon bajarilgan deb belgilangan.", show_alert=True)
+        return
+
+    db.set_order_status(order_id, "bajarildi")
+
+    # admin xabarini yangilaymiz (tugmani olib tashlab, holatni ko'rsatamiz)
+    try:
+        old_text = callback.message.text or callback.message.caption or ""
+        await callback.message.edit_text(old_text + "\n\n✅ BAJARILDI", reply_markup=None)
+    except Exception:
+        pass
+    await callback.answer("✅ Bajarildi deb belgilandi.")
+
+    customer_bot = get_customer_bot()
+    try:
+        await customer_bot.send_message(
+            order["user_id"],
+            f"{tge('check', '✔️')} Buyurtmangiz bajarildi!\n\n"
+            f"🆔 Buyurtma raqami: #{order_id}\n"
+            f"📦 {order['item_name'] or ''}"
+        )
+    except Exception:
+        pass
