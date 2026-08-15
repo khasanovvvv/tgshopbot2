@@ -894,8 +894,8 @@ async def smm_menu(callback: CallbackQuery):
     text = "📈 <b>Nakrutka xizmatlari</b>\n\n"
     if platforms:
         for p in platforms:
-            services = db.get_smm_services_by_platform(p["id"])
-            text += f"{p['emoji']} {p['name']} — {len(services)} ta xizmat\n"
+            categories = db.get_smm_categories(p["id"])
+            text += f"{p['emoji']} {p['name']} — {len(categories)} ta kategoriya\n"
     else:
         text += "(hozircha platforma qo'shilmagan)"
 
