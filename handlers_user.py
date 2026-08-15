@@ -10,9 +10,24 @@ from aiogram.fsm.state import State, StatesGroup
 
 import database as db
 import smm_api
-from config import ADMIN_ID
+from config import ADMIN_ID, BOT_TOKEN, ADMIN_BOT_TOKEN
 
 router = Router()
+
+
+# ---------- Admin botiga xabar yuborish uchun yordamchi ----------
+# Buyurtma xabarlari endi (agar sozlangan bo'lsa) ALOHIDA admin bot orqali
+# adminning shaxsiy chatiga keladi, mijozlar boti orqali emas.
+_admin_notifier_bot = None
+
+
+def get_admin_notifier_bot(fallback_bot: Bot) -> Bot:
+    global _admin_notifier_bot
+    if ADMIN_BOT_TOKEN:
+        if _admin_notifier_bot is None:
+            _admin_notifier_bot = Bot(token=ADMIN_BOT_TOKEN)
+        return _admin_notifier_bot
+    return fallback_bot
 
 
 # ---------- FSM ----------
@@ -64,6 +79,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
         [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
         [InlineKeyboardButton(text="📈 Nakrutka xizmati", callback_data="menu:smm", style="primary")],
+        [InlineKeyboardButton(text="🧾 Buyurtmalarim", callback_data="menu:myorders", style="primary")],
         [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")],
         [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success")],
         [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
@@ -296,7 +312,8 @@ async def topup_receipt(message: Message, state: FSMContext, bot: Bot):
             InlineKeyboardButton(text="❌ Rad etish", callback_data=f"topup_no:{topup_id}", style="danger"),
         ]
     ])
-    await bot.send_photo(ADMIN_ID, receipt_file_id, caption=caption, reply_markup=kb)
+    notifier = get_admin_notifier_bot(bot)
+    await notifier.send_photo(ADMIN_ID, receipt_file_id, caption=caption, reply_markup=kb)
 
 
 @router.message(TopupState.waiting_receipt)
@@ -506,33 +523,42 @@ async def process_order(callback: CallbackQuery, bot: Bot, item, final_price: in
         return
 
     db.add_balance(user.id, -final_price)
-    await send_order_notification(bot, user, item, final_price, promo_code)
+    order_id = await send_order_notification(bot, user, item, final_price, promo_code)
     await callback.answer("Buyurtmangiz qabul qilindi!", show_alert=False)
-    await send_order_confirmation(bot, user.id, item, final_price)
+    await send_order_confirmation(bot, user.id, item, final_price, order_id)
 
 
 async def send_order_notification(bot: Bot, user, item, final_price: int, promo_code):
-    db.log_order(item["id"], user.id, final_price, promo_code)
+    order_id = db.log_order(item["id"], user.id, final_price, promo_code, order_type="item", item_name=item["name"])
 
     username_part = f"@{user.username}" if user.username else "username yo'q"
     text = (
         "🆕 Yangi buyurtma!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n\n"
         f"👤 Foydalanuvchi: {user.full_name} ({username_part})\n"
-        f"🆔 ID: {user.id}\n\n"
+        f"🆔 Foydalanuvchi ID: {user.id}\n\n"
         f"📦 Xizmat: {item['name']}\n"
         f"💵 Narxi: {final_price:,} so'm".replace(",", " ") +
         "\n💰 Balansdan avtomatik yechildi."
     )
     if promo_code:
         text += f"\n🎟 Promokod: {promo_code}"
-    await bot.send_message(ADMIN_ID, text)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Bajarildi deb belgilash", callback_data=f"order_done:{order_id}", style="success")]
+    ])
+    notifier = get_admin_notifier_bot(bot)
+    await notifier.send_message(ADMIN_ID, text, reply_markup=kb)
+    return order_id
 
 
-async def send_order_confirmation(bot: Bot, user_id: int, item, final_price: int):
+async def send_order_confirmation(bot: Bot, user_id: int, item, final_price: int, order_id: int):
     text = (
         f"{tge('check', '✔️')} Buyurtmangiz qabul qilindi!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n"
         f"📦 {item['name']} — {final_price:,} so'm".replace(",", " ") + "\n\n"
-        "Tez orada admin siz bilan bog'lanadi."
+        "Tez orada admin siz bilan bog'lanadi.\n"
+        "Holatini «🧾 Buyurtmalarim» bo'limidan kuzatib borishingiz mumkin."
     )
     await bot.send_message(user_id, text)
 
@@ -744,28 +770,68 @@ async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
         return
 
     db.add_balance(message.from_user.id, -price)
-    db.create_smm_order(message.from_user.id, service["id"], link, quantity, price, panel_order_id)
+    order_id = db.log_order(
+        item_id=None, user_id=message.from_user.id, price=price, promo_code=None,
+        order_type="smm", item_name=service["name"], link=link,
+        quantity=quantity, panel_order_id=panel_order_id
+    )
 
     await message.answer(
         f"{tge('check', '✔️')} Buyurtma qabul qilindi!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n\n"
         f"📦 {service['name']}\n"
         f"🔗 {link}\n"
         f"🔢 Miqdor: {quantity}\n"
         f"💵 Narxi: {price:,} so'm\n".replace(",", " ") +
-        f"🆔 Buyurtma raqami: {panel_order_id}\n\n" +
-        "Buyurtmangiz bajarilishi biroz vaqt olishi mumkin."
+        "\nBuyurtmangiz bajarilishi biroz vaqt olishi mumkin.\n"
+        "Holatini «🧾 Buyurtmalarim» bo'limidan kuzatib borishingiz mumkin."
     )
 
     user = message.from_user
     username_part = f"@{user.username}" if user.username else "username yo'q"
-    await bot.send_message(
-        ADMIN_ID,
+    text = (
         "📈 Yangi nakrutka buyurtmasi!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n\n"
         f"👤 {user.full_name} ({username_part})\n"
-        f"🆔 ID: {user.id}\n\n"
+        f"🆔 Foydalanuvchi ID: {user.id}\n\n"
         f"📦 {service['name']}\n"
         f"🔗 {link}\n"
         f"🔢 Miqdor: {quantity}\n"
         f"💵 Narxi: {price:,} so'm\n".replace(",", " ") +
         f"🆔 Panel buyurtma raqami: {panel_order_id}"
     )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Bajarildi deb belgilash", callback_data=f"order_done:{order_id}", style="success")]
+    ])
+    notifier = get_admin_notifier_bot(bot)
+    await notifier.send_message(ADMIN_ID, text, reply_markup=kb)
+
+
+# ---------- BUYURTMALARIM ----------
+STATUS_LABELS = {
+    "yangi": "🟡 Jarayonda",
+    "bajarildi": "🟢 Bajarildi",
+    "bekor qilindi": "🔴 Bekor qilindi",
+}
+
+
+@router.callback_query(F.data == "menu:myorders")
+async def my_orders(callback: CallbackQuery):
+    orders = db.get_user_orders(callback.from_user.id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
+
+    if not orders:
+        await callback.message.edit_text("Sizda hozircha buyurtmalar yo'q.", reply_markup=kb)
+        await callback.answer()
+        return
+
+    text = "🧾 <b>Buyurtmalarim</b>\n\n"
+    for o in orders[:20]:
+        status = STATUS_LABELS.get(o["status"], o["status"])
+        text += (
+            f"🆔 #{o['id']} — {o['item_name'] or ''}\n"
+            f"💵 {o['price']:,} so'm — {status}\n\n".replace(",", " ")
+        )
+
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
