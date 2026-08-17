@@ -1,4 +1,5 @@
 # handlers_user.py
+import logging
 from aiogram import Router, F, Bot
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
@@ -19,6 +20,7 @@ router = Router()
 # Buyurtma xabarlari endi (agar sozlangan bo'lsa) ALOHIDA admin bot orqali
 # adminning shaxsiy chatiga keladi, mijozlar boti orqali emas.
 _admin_notifier_bot = None
+_admin_notify_log = logging.getLogger("admin_notify")
 
 
 def get_admin_notifier_bot(fallback_bot: Bot) -> Bot:
@@ -28,6 +30,33 @@ def get_admin_notifier_bot(fallback_bot: Bot) -> Bot:
             _admin_notifier_bot = Bot(token=ADMIN_BOT_TOKEN)
         return _admin_notifier_bot
     return fallback_bot
+
+
+async def notify_admin_text(fallback_bot: Bot, text: str, reply_markup=None):
+    """Admin botiga xabar yuboradi; muvaffaqiyatsiz bo'lsa, asosiy bot orqali yuboradi."""
+    notifier = get_admin_notifier_bot(fallback_bot)
+    try:
+        await notifier.send_message(ADMIN_ID, text, reply_markup=reply_markup)
+    except Exception as e:
+        _admin_notify_log.error(f"Admin botiga xabar yuborilmadi: {e}")
+        if notifier is not fallback_bot:
+            try:
+                await fallback_bot.send_message(ADMIN_ID, text, reply_markup=reply_markup)
+            except Exception as e2:
+                _admin_notify_log.error(f"Zaxira orqali ham yuborilmadi: {e2}")
+
+
+async def notify_admin_photo(fallback_bot: Bot, photo: str, caption: str, reply_markup=None):
+    notifier = get_admin_notifier_bot(fallback_bot)
+    try:
+        await notifier.send_photo(ADMIN_ID, photo, caption=caption, reply_markup=reply_markup)
+    except Exception as e:
+        _admin_notify_log.error(f"Admin botiga rasm yuborilmadi: {e}")
+        if notifier is not fallback_bot:
+            try:
+                await fallback_bot.send_photo(ADMIN_ID, photo, caption=caption, reply_markup=reply_markup)
+            except Exception as e2:
+                _admin_notify_log.error(f"Zaxira orqali ham yuborilmadi: {e2}")
 
 
 # ---------- FSM ----------
@@ -312,8 +341,7 @@ async def topup_receipt(message: Message, state: FSMContext, bot: Bot):
             InlineKeyboardButton(text="❌ Rad etish", callback_data=f"topup_no:{topup_id}", style="danger"),
         ]
     ])
-    notifier = get_admin_notifier_bot(bot)
-    await notifier.send_photo(ADMIN_ID, receipt_file_id, caption=caption, reply_markup=kb)
+    await notify_admin_photo(bot, receipt_file_id, caption, reply_markup=kb)
 
 
 @router.message(TopupState.waiting_receipt)
@@ -539,16 +567,19 @@ async def send_order_notification(bot: Bot, user, item, final_price: int, promo_
         f"🆔 Foydalanuvchi ID: {user.id}\n\n"
         f"📦 Xizmat: {item['name']}\n"
         f"💵 Narxi: {final_price:,} so'm".replace(",", " ") +
-        "\n💰 Balansdan avtomatik yechildi."
+        "\n💰 Balansdan avtomatik yechildi.\n\n" +
+        "⚠️ Tasdiqlaysizmi? (Bekor qilsangiz, mijozga pul avtomatik qaytariladi)"
     )
     if promo_code:
         text += f"\n🎟 Promokod: {promo_code}"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Bajarildi deb belgilash", callback_data=f"order_done:{order_id}", style="success")]
+        [
+            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_confirm:{order_id}", style="success"),
+            InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"order_cancel:{order_id}", style="danger"),
+        ]
     ])
-    notifier = get_admin_notifier_bot(bot)
-    await notifier.send_message(ADMIN_ID, text, reply_markup=kb)
+    await notify_admin_text(bot, text, reply_markup=kb)
     return order_id
 
 
@@ -801,10 +832,10 @@ async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
         f"🆔 Panel buyurtma raqami: {panel_order_id}"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Bajarildi deb belgilash", callback_data=f"order_done:{order_id}", style="success")]
+        [InlineKeyboardButton(text="🔄 Xpanel holatini tekshirish", callback_data=f"order_check_panel:{order_id}", style="primary")],
+        [InlineKeyboardButton(text="❌ Bekor qilish (pulni qaytarish)", callback_data=f"order_cancel:{order_id}", style="danger")],
     ])
-    notifier = get_admin_notifier_bot(bot)
-    await notifier.send_message(ADMIN_ID, text, reply_markup=kb)
+    await notify_admin_text(bot, text, reply_markup=kb)
 
 
 # ---------- BUYURTMALARIM ----------
