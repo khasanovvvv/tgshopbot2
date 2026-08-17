@@ -5,7 +5,7 @@ from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
-from aiogram.filters import CommandStart, CommandObject
+from aiogram.filters import CommandStart, CommandObject, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -103,17 +103,25 @@ def main_menu_kb() -> InlineKeyboardMarkup:
     e_contact = db.get_setting("emoji_contact") or "👨‍💻"
     e_channel = db.get_setting("emoji_channel") or "📢"
     e_top = db.get_setting("emoji_top") or "🔥"
+    top_enabled = db.get_setting("top_offers_enabled") == "1"
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")],
-        [InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger")],
-        [InlineKeyboardButton(text="📈 Nakrutka xizmati", callback_data="menu:smm", style="primary")],
-        [InlineKeyboardButton(text="🧾 Buyurtmalarim", callback_data="menu:myorders", style="primary")],
-        [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")],
-        [InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success")],
+    row1 = [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")]
+    if top_enabled:
+        row1.append(InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger"))
+
+    rows = [
+        row1,
+        [
+            InlineKeyboardButton(text="📈 Nakrutka xizmati", callback_data="menu:smm", style="primary"),
+            InlineKeyboardButton(text="🧾 Buyurtmalarim", callback_data="menu:myorders", style="primary"),
+        ],
+        [
+            InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary"),
+            InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success"),
+        ],
         [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
-    ])
-    return kb
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def back_button(callback_data: str) -> InlineKeyboardButton:
@@ -257,34 +265,41 @@ async def back_to_main(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "menu:contact")
-async def contact_admin(callback: CallbackQuery):
+def build_contact_admin_content():
     admin_username = db.get_setting("admin_username")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}", style="success")],
         [back_button("menu:main")],
     ])
-    await callback.message.edit_text(
-        f"Admin bilan bog'lanish uchun: {admin_username}",
-        reply_markup=kb
-    )
+    return f"Admin bilan bog'lanish uchun: {admin_username}", kb
+
+
+@router.callback_query(F.data == "menu:contact")
+async def contact_admin(callback: CallbackQuery):
+    text, kb = build_contact_admin_content()
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 
 # ---------- BALANSNI TO'LDIRISH ----------
-@router.callback_query(F.data == "menu:topup")
-async def topup_start(callback: CallbackQuery, state: FSMContext):
+def build_topup_content(user_id: int):
     min_amount = db.get_setting("payment_min_amount") or "1000"
-    balance = db.get_balance(callback.from_user.id)
-    await state.set_state(TopupState.waiting_amount)
+    balance = db.get_balance(user_id)
     kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
-    await callback.message.edit_text(
+    text = (
         f"💰 Joriy balansingiz: <b>{balance:,} so'm</b>\n\n".replace(",", " ") +
         "💳 To'lov usuli: Uzcard/Humo (avto)\n\n"
         "💵 To'lov miqdorini kiriting:\n"
-        f"⏩ Minimal: {int(min_amount):,} so'm".replace(",", " "),
-        reply_markup=kb
+        f"⏩ Minimal: {int(min_amount):,} so'm".replace(",", " ")
     )
+    return text, kb
+
+
+@router.callback_query(F.data == "menu:topup")
+async def topup_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(TopupState.waiting_amount)
+    text, kb = build_topup_content(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 
@@ -378,34 +393,42 @@ async def show_categories(callback: CallbackQuery):
 
 
 # ---------- TOP TAKLIFLAR ----------
-@router.callback_query(F.data == "menu:top")
-async def show_top_items(callback: CallbackQuery):
-    items = db.get_top_items()
-
-    if not items:
+def build_top_offers_content():
+    """(matn, klaviatura) qaytaradi. Agar Top o'chirilgan yoki bo'sh bo'lsa ham ishlaydi."""
+    if db.get_setting("top_offers_enabled") != "1":
         kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
-        await callback.message.edit_text(
-            "Hozircha Top takliflar belgilanmagan.",
-            reply_markup=kb
-        )
-        await callback.answer()
-        return
+        return "Hozircha Top takliflar bo'limi o'chirilgan.", kb
 
-    buttons = [
-        [InlineKeyboardButton(
+    items = db.get_top_items()
+    smm_services = db.get_top_smm_services()
+
+    if not items and not smm_services:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
+        return "Hozircha Top takliflar belgilanmagan.", kb
+
+    buttons = []
+    for item in items:
+        buttons.append([InlineKeyboardButton(
             text=f"🔥 {item['name']} — {item['price']:,} so'm".replace(",", " "),
             callback_data=f"item:{item['id']}",
             style="danger"
-        )]
-        for item in items
-    ]
+        )])
+    for s in smm_services:
+        buttons.append([InlineKeyboardButton(
+            text=f"🔥 {s['name']} — {s['price_per_1000']:,} so'm/1000".replace(",", " "),
+            callback_data=f"smmservice:{s['id']}",
+            style="danger"
+        )])
     buttons.append([back_button("menu:main")])
 
     header = f"{tge('bag', '🛍')} {tge('fire', '🔥')} <b>Top takliflar</b>:"
-    await callback.message.edit_text(
-        header,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
+    return header, InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.callback_query(F.data == "menu:top")
+async def show_top_items(callback: CallbackQuery):
+    text, kb = build_top_offers_content()
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 
@@ -846,15 +869,12 @@ STATUS_LABELS = {
 }
 
 
-@router.callback_query(F.data == "menu:myorders")
-async def my_orders(callback: CallbackQuery):
-    orders = db.get_user_orders(callback.from_user.id)
+def build_my_orders_content(user_id: int):
+    orders = db.get_user_orders(user_id)
     kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
 
     if not orders:
-        await callback.message.edit_text("Sizda hozircha buyurtmalar yo'q.", reply_markup=kb)
-        await callback.answer()
-        return
+        return "Sizda hozircha buyurtmalar yo'q.", kb
 
     text = "🧾 <b>Buyurtmalarim</b>\n\n"
     for o in orders[:20]:
@@ -863,6 +883,56 @@ async def my_orders(callback: CallbackQuery):
             f"🆔 #{o['id']} — {o['item_name'] or ''}\n"
             f"💵 {o['price']:,} so'm — {status}\n\n".replace(",", " ")
         )
+    return text, kb
 
+
+@router.callback_query(F.data == "menu:myorders")
+async def my_orders(callback: CallbackQuery):
+    text, kb = build_my_orders_content(callback.from_user.id)
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+# ---------- TEZKOR BUYRUQLAR (/pay, /orders, /admin, /top) ----------
+async def _require_ready(message: Message) -> bool:
+    """Bloklanmagan, telefoni tasdiqlangan va obunani o'tgan foydalanuvchimi - tekshiradi."""
+    if db.is_blocked(message.from_user.id):
+        await message.answer("⛔️ Siz botdan foydalanish huquqidan mahrum qilingansiz.")
+        return False
+    if not db.has_phone(message.from_user.id):
+        await message.answer(PHONE_REQUEST_TEXT, reply_markup=phone_request_kb())
+        return False
+    return True
+
+
+@router.message(Command("pay"))
+async def cmd_pay(message: Message, state: FSMContext):
+    if not await _require_ready(message):
+        return
+    await state.set_state(TopupState.waiting_amount)
+    text, kb = build_topup_content(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("orders"))
+async def cmd_orders(message: Message):
+    if not await _require_ready(message):
+        return
+    text, kb = build_my_orders_content(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("admin"))
+async def cmd_contact_admin(message: Message):
+    if not await _require_ready(message):
+        return
+    text, kb = build_contact_admin_content()
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("top"))
+async def cmd_top(message: Message):
+    if not await _require_ready(message):
+        return
+    text, kb = build_top_offers_content()
+    await message.answer(text, reply_markup=kb)
