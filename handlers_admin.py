@@ -1568,9 +1568,17 @@ async def set_req_channel_url_finish(message: Message, state: FSMContext):
     await message.answer("✅ Kanal link saqlandi.", reply_markup=admin_menu_kb())
 
 
-# ---------- BUYURTMANI "BAJARILDI" DEB BELGILASH ----------
-@router.callback_query(F.data.startswith("order_done:"))
-async def mark_order_done(callback: CallbackQuery):
+# ---------- BUYURTMANI TASDIQLASH / BEKOR QILISH / XPANEL HOLATI ----------
+async def _update_order_message(callback: CallbackQuery, suffix: str):
+    try:
+        old_text = callback.message.text or callback.message.caption or ""
+        await callback.message.edit_text(old_text + f"\n\n{suffix}", reply_markup=None)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("order_confirm:"))
+async def order_confirm(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
     order_id = int(callback.data.split(":")[1])
@@ -1579,28 +1587,98 @@ async def mark_order_done(callback: CallbackQuery):
     if not order:
         await callback.answer("Buyurtma topilmadi.", show_alert=True)
         return
-
-    if order["status"] == "bajarildi":
-        await callback.answer("Bu buyurtma allaqachon bajarilgan deb belgilangan.", show_alert=True)
+    if order["status"] != "yangi":
+        await callback.answer("Bu buyurtma allaqachon ko'rib chiqilgan.", show_alert=True)
         return
 
     db.set_order_status(order_id, "bajarildi")
-
-    # admin xabarini yangilaymiz (tugmani olib tashlab, holatni ko'rsatamiz)
-    try:
-        old_text = callback.message.text or callback.message.caption or ""
-        await callback.message.edit_text(old_text + "\n\n✅ BAJARILDI", reply_markup=None)
-    except Exception:
-        pass
-    await callback.answer("✅ Bajarildi deb belgilandi.")
+    await _update_order_message(callback, "✅ TASDIQLANDI")
+    await callback.answer("✅ Tasdiqlandi.")
 
     customer_bot = get_customer_bot()
     try:
         await customer_bot.send_message(
             order["user_id"],
-            f"{tge('check', '✔️')} Buyurtmangiz bajarildi!\n\n"
+            f"{tge('check', '✔️')} Buyurtmangiz tasdiqlandi!\n\n"
             f"🆔 Buyurtma raqami: #{order_id}\n"
             f"📦 {order['item_name'] or ''}"
         )
     except Exception:
         pass
+
+
+@router.callback_query(F.data.startswith("order_cancel:"))
+async def order_cancel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    order_id = int(callback.data.split(":")[1])
+    order = db.get_order(order_id)
+
+    if not order:
+        await callback.answer("Buyurtma topilmadi.", show_alert=True)
+        return
+    if order["status"] == "bekor qilindi":
+        await callback.answer("Bu buyurtma allaqachon bekor qilingan.", show_alert=True)
+        return
+
+    db.set_order_status(order_id, "bekor qilindi")
+    db.add_balance(order["user_id"], order["price"])
+    await _update_order_message(callback, "❌ BEKOR QILINDI (pul mijozga qaytarildi)")
+    await callback.answer("❌ Bekor qilindi, pul mijozga qaytarildi.")
+
+    customer_bot = get_customer_bot()
+    try:
+        await customer_bot.send_message(
+            order["user_id"],
+            f"⚠️ Buyurtmangiz bekor qilindi.\n\n"
+            f"🆔 Buyurtma raqami: #{order_id}\n"
+            f"📦 {order['item_name'] or ''}\n\n"
+            f"💰 {order['price']:,} so'm balansingizga qaytarildi.".replace(",", " ")
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("order_check_panel:"))
+async def order_check_panel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    order_id = int(callback.data.split(":")[1])
+    order = db.get_order(order_id)
+
+    if not order or not order["panel_order_id"]:
+        await callback.answer("Bu buyurtma panelga bog'liq emas.", show_alert=True)
+        return
+
+    await callback.answer("⏳ Tekshirilmoqda...")
+    result = smm_api.get_order_status(order["panel_order_id"])
+
+    if not isinstance(result, dict) or "status" not in result:
+        error = result.get("error") if isinstance(result, dict) else "Noma'lum xatolik"
+        await callback.message.answer(f"❌ Panel bilan bog'lanishda xatolik: {error}")
+        return
+
+    panel_status = str(result.get("status", "-"))
+    info_text = (
+        f"📊 Xpanel holati (buyurtma #{order_id}): {panel_status}\n"
+        f"Boshlang'ich son: {result.get('start_count', '-')}\n"
+        f"Qolgan: {result.get('remains', '-')}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Qayta tekshirish", callback_data=f"order_check_panel:{order_id}", style="primary")],
+        [InlineKeyboardButton(text="❌ Bekor qilish (pulni qaytarish)", callback_data=f"order_cancel:{order_id}", style="danger")],
+    ])
+    await callback.message.answer(info_text, reply_markup=kb)
+
+    if panel_status.lower() == "completed" and order["status"] != "bajarildi":
+        db.set_order_status(order_id, "bajarildi")
+        customer_bot = get_customer_bot()
+        try:
+            await customer_bot.send_message(
+                order["user_id"],
+                f"{tge('check', '✔️')} Buyurtmangiz bajarildi!\n\n"
+                f"🆔 Buyurtma raqami: #{order_id}\n"
+                f"📦 {order['item_name'] or ''}"
+            )
+        except Exception:
+            pass
