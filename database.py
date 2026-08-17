@@ -79,6 +79,10 @@ def init_db():
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("top_offers_enabled", "1")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
         ("channel_url", "https://t.me/your_channel")
     )
     default_emojis = {
@@ -186,6 +190,7 @@ def init_db():
     """)
     cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS average_time TEXT DEFAULT ''")
     cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES smm_categories(id)")
+    cur.execute("ALTER TABLE smm_services ADD COLUMN IF NOT EXISTS is_top INTEGER DEFAULT 0")
     # eski bazalarda "platform_id" ustuni NOT NULL bo'lib qolgan bo'lishi mumkin -
     # endi xizmatlar category_id orqali bog'lanadi, shu sababli bu cheklovni olib tashlaymiz
     try:
@@ -615,6 +620,29 @@ def toggle_item_top(item_id: int) -> bool:
     cur.close()
     release(conn)
     return bool(new_value)
+
+
+def toggle_smm_service_top(service_id: int) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT is_top FROM smm_services WHERE id = %s", (service_id,))
+    row = cur.fetchone()
+    new_value = 0 if row["is_top"] else 1
+    cur.execute("UPDATE smm_services SET is_top = %s WHERE id = %s", (new_value, service_id))
+    conn.commit()
+    cur.close()
+    release(conn)
+    return bool(new_value)
+
+
+def get_top_smm_services():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM smm_services WHERE is_top = 1 ORDER BY id")
+    rows = cur.fetchall()
+    cur.close()
+    release(conn)
+    return rows
 
 
 # ---------- SMM PLATFORMALAR ----------
