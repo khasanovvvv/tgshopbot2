@@ -119,6 +119,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories", style="success")],
         [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin:users", style="success")],
         [InlineKeyboardButton(text="📈 Nakrutka xizmatlari", callback_data="admin:smm", style="success")],
+        [InlineKeyboardButton(text="🔥 Top takliflar sozlamasi", callback_data="admin:top_settings", style="success")],
         [InlineKeyboardButton(text="💵 Kurs va ustama", callback_data="admin:currency_settings", style="success")],
         [InlineKeyboardButton(text="💳 To'lov sozlamalari", callback_data="admin:payment_settings", style="success")],
         [InlineKeyboardButton(text="🔒 Majburiy obuna", callback_data="admin:required_channel", style="success")],
@@ -1040,14 +1041,53 @@ async def manage_smm_category(callback: CallbackQuery):
         [InlineKeyboardButton(text="➕ Xizmat qo'shish", callback_data=f"admin:add_smm_service:{category_id}", style="primary")],
     ]
     for s in services:
+        top_mark = "🔥 " if s["is_top"] else ""
         buttons.append([InlineKeyboardButton(
-            text=f"🗑 {s['name']}", callback_data=f"admin:del_smm_service:{s['id']}:{category_id}", style="danger"
+            text=f"{top_mark}{s['name']}", callback_data=f"admin:manage_smm_service:{s['id']}:{category_id}", style="success"
         )])
     buttons.append([InlineKeyboardButton(text="🗑 Kategoriyani o'chirish", callback_data=f"admin:del_smm_category:{category_id}:{category['platform_id']}", style="danger")])
     buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:platform:{category['platform_id']}")])
 
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:manage_smm_service:"))
+async def manage_smm_service(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    parts = callback.data.split(":")
+    service_id, category_id = int(parts[2]), int(parts[3])
+    s = db.get_smm_service(service_id)
+
+    top_status = "✅ Ha" if s["is_top"] else "❌ Yo'q"
+    text = (
+        f"📦 {s['name']}\n\n"
+        f"💵 Narxi: {s['price_per_1000']:,} so'm/1000\n".replace(",", " ") +
+        f"🔽 Minimal: {s['min_qty']} — 🔼 Maksimal: {s['max_qty']}\n"
+        f"🔥 Top taklifda: {top_status}"
+    )
+    top_btn_text = "🔥 Topdan olib tashlash" if s["is_top"] else "🔥 Top taklifga qo'shish"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=top_btn_text, callback_data=f"admin:toggle_smm_top:{service_id}:{category_id}")],
+        [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"admin:del_smm_service:{service_id}:{category_id}", style="danger")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:smmcategory:{category_id}")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin:toggle_smm_top:"))
+async def toggle_smm_top_cb(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    parts = callback.data.split(":")
+    service_id, category_id = int(parts[2]), int(parts[3])
+    new_state = db.toggle_smm_service_top(service_id)
+    await callback.answer("🔥 Top taklifga qo'shildi ✅" if new_state else "Topdan olib tashlandi", show_alert=True)
+    fake_data = f"admin:manage_smm_service:{service_id}:{category_id}"
+    callback.data = fake_data
+    await manage_smm_service(callback)
 
 
 @router.callback_query(F.data.startswith("admin:del_smm_category:"))
@@ -1682,3 +1722,38 @@ async def order_check_panel(callback: CallbackQuery):
             )
         except Exception:
             pass
+
+
+# ---------- TOP TAKLIFLAR YOQISH/O'CHIRISH ----------
+@router.callback_query(F.data == "admin:top_settings")
+async def top_settings_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    enabled = db.get_setting("top_offers_enabled") == "1"
+    status_text = "✅ Yoqilgan" if enabled else "❌ O'chirilgan"
+    toggle_text = "🔴 O'chirish" if enabled else "🟢 Yoqish"
+
+    text = (
+        "🔥 <b>Top takliflar bo'limi</b>\n\n"
+        f"Holati: {status_text}\n\n"
+        "O'chirilsa, mijozlarga asosiy menyuda «Top takliflar» tugmasi umuman ko'rinmaydi.\n\n"
+        "Xizmatni Top qilib belgilash uchun:\n"
+        "• Oddiy xizmatlar: kategoriya ichida xizmatni oching → «🔥 Top taklifga qo'shish»\n"
+        "• Nakrutka xizmatlari: platforma → kategoriya → xizmatni oching → «🔥 Top taklifga qo'shish»"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data="admin:toggle_top_offers", style="danger" if enabled else "success")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:toggle_top_offers")
+async def toggle_top_offers(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    enabled = db.get_setting("top_offers_enabled") == "1"
+    db.set_setting("top_offers_enabled", "0" if enabled else "1")
+    await callback.answer("Holat yangilandi ✅")
+    await top_settings_menu(callback)
