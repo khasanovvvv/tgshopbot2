@@ -391,7 +391,7 @@ def set_order_status(order_id: int, status: str):
 def get_order_count() -> int:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS c FROM orders")
+    cur.execute("SELECT COUNT(*) AS c FROM orders WHERE status != 'bekor qilindi'")
     row = cur.fetchone()
     cur.close()
     release(conn)
@@ -401,7 +401,7 @@ def get_order_count() -> int:
 def get_total_revenue() -> int:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT COALESCE(SUM(price), 0) AS s FROM orders")
+    cur.execute("SELECT COALESCE(SUM(price), 0) AS s FROM orders WHERE status != 'bekor qilindi'")
     row = cur.fetchone()
     cur.close()
     release(conn)
