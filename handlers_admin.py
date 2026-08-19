@@ -153,8 +153,9 @@ async def add_cat_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(AddCategory.name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:categories")]])
     await callback.message.edit_text(
-        "Yangi kategoriya nomini yozing (masalan: Telegram Premium):"
+        "Yangi kategoriya nomini yozing (masalan: Telegram Premium):", reply_markup=kb
     )
     await callback.answer()
 
@@ -245,7 +246,8 @@ async def rename_category_start(callback: CallbackQuery, state: FSMContext):
     category_id = int(callback.data.split(":")[2])
     await state.update_data(category_id=category_id)
     await state.set_state(RenameCategory.new_name)
-    await callback.message.edit_text("Kategoriyaning yangi nomini yozing:")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=f"admin:cat:{category_id}")]])
+    await callback.message.edit_text("Kategoriyaning yangi nomini yozing:", reply_markup=kb)
     await callback.answer()
 
 
@@ -270,8 +272,9 @@ async def add_item_start(callback: CallbackQuery, state: FSMContext):
     category_id = int(callback.data.split(":")[2])
     await state.update_data(category_id=category_id)
     await state.set_state(AddItem.name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=f"admin:cat:{category_id}")]])
     await callback.message.edit_text(
-        "Xizmat nomini yozing (masalan: Telegram Premium 1 oylik):"
+        "Xizmat nomini yozing (masalan: Telegram Premium 1 oylik):", reply_markup=kb
     )
     await callback.answer()
 
@@ -371,7 +374,8 @@ async def edit_price_start(callback: CallbackQuery, state: FSMContext):
     item_id = int(callback.data.split(":")[2])
     await state.update_data(item_id=item_id)
     await state.set_state(EditPrice.new_price)
-    await callback.message.edit_text("Yangi narxni kiriting (faqat raqam):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=f"admin:item:{item_id}")]])
+    await callback.message.edit_text("Yangi narxni kiriting (faqat raqam):", reply_markup=kb)
     await callback.answer()
 
 
@@ -410,7 +414,8 @@ async def set_admin_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(EditSettings.admin_username)
-    await callback.message.edit_text("Yangi admin username kiriting (masalan: @username):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:settings")]])
+    await callback.message.edit_text("Yangi admin username kiriting (masalan: @username):", reply_markup=kb)
     await callback.answer()
 
 
@@ -428,7 +433,8 @@ async def set_channel_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(EditSettings.channel_url)
-    await callback.message.edit_text("Yangi kanal linkini kiriting (masalan: https://t.me/kanal):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:settings")]])
+    await callback.message.edit_text("Yangi kanal linkini kiriting (masalan: https://t.me/kanal):", reply_markup=kb)
     await callback.answer()
 
 
@@ -470,7 +476,8 @@ async def add_promo_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(AddPromo.code)
-    await callback.message.edit_text("Promokod matnini kiriting (masalan: SALOM):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:promos")]])
+    await callback.message.edit_text("Promokod matnini kiriting (masalan: SALOM):", reply_markup=kb)
     await callback.answer()
 
 
@@ -606,7 +613,8 @@ async def set_emoji_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(key=key)
     await state.set_state(EditEmoji.new_emoji)
     label = EMOJI_LABELS.get(key, key)
-    await callback.message.edit_text(f"«{label}» uchun yangi emojini yuboring (masalan: 🟢):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:emojis")]])
+    await callback.message.edit_text(f"«{label}» uchun yangi emojini yuboring (masalan: 🟢):", reply_markup=kb)
     await callback.answer()
 
 
@@ -749,7 +757,7 @@ async def show_user_card(message: Message, user_id: int):
             InlineKeyboardButton(text="➖ Pul ayirish", callback_data=f"admin:subbal:{user_id}", style="danger"),
         ],
         [InlineKeyboardButton(text=block_text, callback_data=f"admin:toggleblock:{user_id}")],
-        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:users")],
     ])
     await message.answer(text, reply_markup=kb)
 
@@ -772,7 +780,8 @@ async def add_balance_start(callback: CallbackQuery, state: FSMContext):
     user_id = int(callback.data.split(":")[2])
     await state.update_data(user_id=user_id, mode="add")
     await state.set_state(AdjustBalance.amount)
-    await callback.message.edit_text("Qo'shiladigan summani kiriting (so'mda):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:users")]])
+    await callback.message.edit_text("Qo'shiladigan summani kiriting (so'mda):", reply_markup=kb)
     await callback.answer()
 
 
@@ -783,7 +792,8 @@ async def sub_balance_start(callback: CallbackQuery, state: FSMContext):
     user_id = int(callback.data.split(":")[2])
     await state.update_data(user_id=user_id, mode="subtract")
     await state.set_state(AdjustBalance.amount)
-    await callback.message.edit_text("Ayiriladigan summani kiriting (so'mda):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:users")]])
+    await callback.message.edit_text("Ayiriladigan summani kiriting (so'mda):", reply_markup=kb)
     await callback.answer()
 
 
@@ -846,7 +856,8 @@ async def set_card_number_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(PaymentSettings.card_number)
-    await callback.message.edit_text("Yangi karta raqamini kiriting:")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:payment_settings")]])
+    await callback.message.edit_text("Yangi karta raqamini kiriting:", reply_markup=kb)
     await callback.answer()
 
 
@@ -864,7 +875,8 @@ async def set_card_owner_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(PaymentSettings.card_owner)
-    await callback.message.edit_text("Karta egasining F.I.SH kiriting:")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:payment_settings")]])
+    await callback.message.edit_text("Karta egasining F.I.SH kiriting:", reply_markup=kb)
     await callback.answer()
 
 
@@ -882,7 +894,8 @@ async def set_min_amount_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(PaymentSettings.min_amount)
-    await callback.message.edit_text("Minimal to'ldirish summasini kiriting (so'mda):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:payment_settings")]])
+    await callback.message.edit_text("Minimal to'ldirish summasini kiriting (so'mda):", reply_markup=kb)
     await callback.answer()
 
 
@@ -930,7 +943,8 @@ async def add_platform_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(AddPlatform.name)
-    await callback.message.edit_text("Platforma nomini kiriting (masalan: Telegram):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:smm")]])
+    await callback.message.edit_text("Platforma nomini kiriting (masalan: Telegram):", reply_markup=kb)
     await callback.answer()
 
 
@@ -1006,8 +1020,9 @@ async def add_smm_category_start(callback: CallbackQuery, state: FSMContext):
     platform_id = int(callback.data.split(":")[2])
     await state.update_data(platform_id=platform_id)
     await state.set_state(AddSmmCategory.name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=f"admin:platform:{platform_id}")]])
     await callback.message.edit_text(
-        "Kategoriya nomini kiriting (masalan: A'zolar, Ko'rishlar, Layklar):"
+        "Kategoriya nomini kiriting (masalan: A'zolar, Ko'rishlar, Layklar):", reply_markup=kb
     )
     await callback.answer()
 
@@ -1214,7 +1229,9 @@ async def smm_by_id_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(AddSmmService.panel_service_id)
-    await callback.message.edit_text("Panel xizmat ID raqamini kiriting:")
+    _data = await state.get_data()
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=f"admin:add_smm_service:{_data.get('category_id')}")]])
+    await callback.message.edit_text("Panel xizmat ID raqamini kiriting:", reply_markup=kb)
     await callback.answer()
 
 
@@ -1234,8 +1251,10 @@ async def smm_by_search_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(SearchPanelServices.keyword)
+    _data = await state.get_data()
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data=f"admin:add_smm_service:{_data.get('category_id')}")]])
     await callback.message.edit_text(
-        "🔍 Qidiruv so'zini kiriting (masalan: instagram followers, telegram members):"
+        "🔍 Qidiruv so'zini kiriting (masalan: instagram followers, telegram members):", reply_markup=kb
     )
     await callback.answer()
 
@@ -1338,7 +1357,8 @@ async def show_category_list(callback: CallbackQuery, state: FSMContext, page: i
         nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"admin:cat_page:{page + 1}"))
     if nav:
         buttons.append(nav)
-    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")])
+    category_id = data.get("category_id")
+    buttons.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"admin:add_smm_service:{category_id}")])
 
     text = f"📂 Kategoriyani tanlang ({len(categories)} ta):"
     await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
@@ -1486,7 +1506,8 @@ async def set_dollar_rate_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(CurrencySettings.dollar_rate)
-    await callback.message.edit_text("1 dollar necha so'm ekanini kiriting (masalan: 12700):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:currency_settings")]])
+    await callback.message.edit_text("1 dollar necha so'm ekanini kiriting (masalan: 12700):", reply_markup=kb)
     await callback.answer()
 
 
@@ -1507,7 +1528,8 @@ async def set_markup_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(CurrencySettings.markup)
-    await callback.message.edit_text("Default ustama foizini kiriting (masalan: 100):")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:currency_settings")]])
+    await callback.message.edit_text("Default ustama foizini kiriting (masalan: 100):", reply_markup=kb)
     await callback.answer()
 
 
@@ -1573,8 +1595,9 @@ async def set_req_channel_username_start(callback: CallbackQuery, state: FSMCont
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(RequiredChannel.username)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:required_channel")]])
     await callback.message.edit_text(
-        "Kanal username'ni kiriting (masalan: @mychannel):"
+        "Kanal username'ni kiriting (masalan: @mychannel):", reply_markup=kb
     )
     await callback.answer()
 
@@ -1593,8 +1616,9 @@ async def set_req_channel_url_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     await state.set_state(RequiredChannel.url)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:required_channel")]])
     await callback.message.edit_text(
-        "Kanalga o'tish uchun havolani kiriting (masalan: https://t.me/mychannel):"
+        "Kanalga o'tish uchun havolani kiriting (masalan: https://t.me/mychannel):", reply_markup=kb
     )
     await callback.answer()
 
