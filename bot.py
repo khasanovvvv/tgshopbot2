@@ -56,9 +56,56 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, ADMIN_BOT_TOKEN
 import database as db
+import smm_api
 import handlers_user
 import handlers_admin
 import admin_bot
+
+
+async def smm_status_checker():
+    """Har 5 daqiqada kutilayotgan nakrutka buyurtmalarini xpanel'dan avtomatik
+    tekshiradi - admin qo'lda bosishi shart emas."""
+    await asyncio.sleep(30)  # bot to'liq ishga tushishini kutamiz
+    notifier = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+    while True:
+        try:
+            orders = db.get_pending_smm_orders()
+            for order in orders:
+                result = smm_api.get_order_status(order["panel_order_id"])
+                if not isinstance(result, dict) or "status" not in result:
+                    continue
+
+                status = str(result.get("status", "")).lower()
+
+                if status == "completed":
+                    db.set_order_status(order["id"], "bajarildi")
+                    try:
+                        await notifier.send_message(
+                            order["user_id"],
+                            f"✔️ Buyurtmangiz bajarildi!\n\n"
+                            f"🆔 Buyurtma raqami: #{order['id']}\n"
+                            f"📦 {order['item_name'] or ''}"
+                        )
+                    except Exception:
+                        pass
+
+                elif status in ("canceled", "cancelled", "refunded"):
+                    db.set_order_status(order["id"], "bekor qilindi")
+                    db.add_balance(order["user_id"], order["price"])
+                    try:
+                        await notifier.send_message(
+                            order["user_id"],
+                            f"⚠️ Buyurtmangiz bekor qilindi (panel tomonidan).\n\n"
+                            f"🆔 Buyurtma raqami: #{order['id']}\n"
+                            f"💰 {order['price']:,} so'm balansingizga qaytarildi.".replace(",", " ")
+                        )
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.error(f"SMM holat tekshiruvchisida xato: {e}")
+
+        await asyncio.sleep(300)  # 5 daqiqa
 
 
 async def run_customer_bot(include_admin_router: bool):
@@ -93,10 +140,17 @@ async def main():
 
     if ADMIN_BOT_TOKEN:
         # Ikkala bot ham ishlaydi: mijozlar boti (admin routerisiz) + alohida admin bot
-        await asyncio.gather(run_customer_bot(include_admin_router=False), run_admin_bot())
+        await asyncio.gather(
+            run_customer_bot(include_admin_router=False),
+            run_admin_bot(),
+            smm_status_checker(),
+        )
     else:
         log.info("ADMIN_BOT_TOKEN berilmagan - faqat asosiy bot ishga tushadi (unda /admin ham ishlaydi).")
-        await run_customer_bot(include_admin_router=True)
+        await asyncio.gather(
+            run_customer_bot(include_admin_router=True),
+            smm_status_checker(),
+        )
 
 
 if __name__ == "__main__":
