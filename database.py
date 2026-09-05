@@ -393,6 +393,19 @@ def set_order_status(order_id: int, status: str):
     release(conn)
 
 
+def get_pending_smm_orders():
+    """Panel holati hali tekshirilmagan (avtomatik nazorat uchun) nakrutka buyurtmalari."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM orders WHERE order_type = 'smm' AND status = 'yangi' AND panel_order_id IS NOT NULL"
+    )
+    rows = cur.fetchall()
+    cur.close()
+    release(conn)
+    return rows
+
+
 def get_order_count() -> int:
     conn = get_conn()
     cur = conn.cursor()
