@@ -1,6 +1,8 @@
 # handlers_user.py
 import logging
 from aiogram import Router, F, Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
@@ -27,7 +29,7 @@ def get_admin_notifier_bot(fallback_bot: Bot) -> Bot:
     global _admin_notifier_bot
     if ADMIN_BOT_TOKEN:
         if _admin_notifier_bot is None:
-            _admin_notifier_bot = Bot(token=ADMIN_BOT_TOKEN)
+            _admin_notifier_bot = Bot(token=ADMIN_BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
         return _admin_notifier_bot
     return fallback_bot
 
@@ -74,6 +76,7 @@ class SmmOrderState(StatesGroup):
     service_id = State()
     waiting_link = State()
     waiting_quantity = State()
+    confirming = State()
 
 
 # ---------- Premium (maxsus animatsion) emojilar ----------
@@ -539,15 +542,50 @@ async def promo_check(message: Message, state: FSMContext):
 
 # ---------- BUYURTMA BERISH (ODDIY) ----------
 @router.callback_query(F.data.startswith("order:"))
-async def make_order(callback: CallbackQuery, bot: Bot):
+async def make_order(callback: CallbackQuery):
+    item_id = int(callback.data.split(":")[1])
+    item = db.get_item(item_id)
+    await show_order_confirmation(callback, item, item["price"], f"orderconfirm:{item_id}")
+
+
+# ---------- BUYURTMA BERISH (PROMOKOD BILAN) ----------
+@router.callback_query(F.data.startswith("orderpromo:"))
+async def make_order_promo(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    item_id, code = int(parts[1]), parts[2]
+    item = db.get_item(item_id)
+    promo = db.get_promocode(code)
+    final_price = max(0, item["price"] - promo["discount"]) if promo else item["price"]
+    await show_order_confirmation(callback, item, final_price, f"orderpromoconfirm:{item_id}:{code}")
+
+
+async def show_order_confirmation(callback: CallbackQuery, item, final_price: int, confirm_callback: str):
+    balance = db.get_balance(callback.from_user.id)
+    text = (
+        f"📦 {item['name']}\n\n"
+        f"💵 Hisobingizdan <b>{final_price:,} so'm</b> yechib olinadi.\n".replace(",", " ") +
+        f"💰 Joriy balansingiz: {balance:,} so'm\n\n".replace(",", " ") +
+        "Tasdiqlaysizmi?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Ha, tasdiqlayman", callback_data=confirm_callback, style="success"),
+            InlineKeyboardButton(text="❌ Yo'q", callback_data=f"item:{item['id']}", style="danger"),
+        ]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("orderconfirm:"))
+async def make_order_confirmed(callback: CallbackQuery, bot: Bot):
     item_id = int(callback.data.split(":")[1])
     item = db.get_item(item_id)
     await process_order(callback, bot, item, item["price"], None)
 
 
-# ---------- BUYURTMA BERISH (PROMOKOD BILAN) ----------
-@router.callback_query(F.data.startswith("orderpromo:"))
-async def make_order_promo(callback: CallbackQuery, bot: Bot):
+@router.callback_query(F.data.startswith("orderpromoconfirm:"))
+async def make_order_promo_confirmed(callback: CallbackQuery, bot: Bot):
     parts = callback.data.split(":")
     item_id, code = int(parts[1]), parts[2]
     item = db.get_item(item_id)
@@ -777,7 +815,7 @@ async def smm_order_link(message: Message, state: FSMContext):
 
 
 @router.message(SmmOrderState.waiting_quantity)
-async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
+async def smm_order_quantity(message: Message, state: FSMContext):
     if not message.text.strip().isdigit():
         await message.answer("❗️ Iltimos, faqat raqam kiriting.")
         return
@@ -808,7 +846,33 @@ async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
         )
         return
 
+    await state.update_data(quantity=quantity, price=price)
+    await state.set_state(SmmOrderState.confirming)
+
+    text = (
+        f"📦 {service['name']}\n"
+        f"🔗 {data['link']}\n"
+        f"🔢 Miqdor: {quantity}\n\n"
+        f"💵 Hisobingizdan <b>{price:,} so'm</b> yechib olinadi.\n".replace(",", " ") +
+        f"💰 Joriy balansingiz: {balance:,} so'm\n\n".replace(",", " ") +
+        "Tasdiqlaysizmi?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Ha, tasdiqlayman", callback_data="smmorderconfirm", style="success"),
+            InlineKeyboardButton(text="❌ Yo'q", callback_data=f"smmservice:{service['id']}", style="danger"),
+        ]
+    ])
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "smmorderconfirm", SmmOrderState.confirming)
+async def smm_order_confirmed(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    service = db.get_smm_service(data["service_id"])
     link = data["link"]
+    quantity = data["quantity"]
+    price = data["price"]
     await state.clear()
 
     # Panelga buyurtma yuboramiz
@@ -817,20 +881,21 @@ async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
 
     if not panel_order_id:
         error_msg = result.get("error", "Noma'lum xatolik") if isinstance(result, dict) else "Noma'lum xatolik"
-        await message.answer(
+        await callback.message.edit_text(
             f"❌ Buyurtma yuborishda xatolik yuz berdi: {error_msg}\n\n"
             "Balansingizdan pul yechilmadi. Iltimos, keyinroq qayta urinib ko'ring yoki admin bilan bog'laning."
         )
+        await callback.answer()
         return
 
-    db.add_balance(message.from_user.id, -price)
+    db.add_balance(callback.from_user.id, -price)
     order_id = db.log_order(
-        item_id=None, user_id=message.from_user.id, price=price, promo_code=None,
+        item_id=None, user_id=callback.from_user.id, price=price, promo_code=None,
         order_type="smm", item_name=service["name"], link=link,
         quantity=quantity, panel_order_id=panel_order_id
     )
 
-    await message.answer(
+    await callback.message.edit_text(
         f"{tge('check', '✔️')} Buyurtma qabul qilindi!\n\n"
         f"🆔 Buyurtma raqami: #{order_id}\n\n"
         f"📦 {service['name']}\n"
@@ -841,7 +906,7 @@ async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
         "Holatini «🧾 Buyurtmalarim» bo'limidan kuzatib borishingiz mumkin."
     )
 
-    user = message.from_user
+    user = callback.from_user
     username_part = f"@{user.username}" if user.username else "username yo'q"
     text = (
         "📈 Yangi nakrutka buyurtmasi!\n\n"
@@ -859,6 +924,7 @@ async def smm_order_quantity(message: Message, state: FSMContext, bot: Bot):
         [InlineKeyboardButton(text="❌ Bekor qilish (pulni qaytarish)", callback_data=f"order_cancel:{order_id}", style="danger")],
     ])
     await notify_admin_text(bot, text, reply_markup=kb)
+    await callback.answer()
 
 
 # ---------- BUYURTMALARIM ----------
