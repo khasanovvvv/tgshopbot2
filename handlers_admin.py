@@ -1,5 +1,7 @@
 # handlers_admin.py
 from aiogram import Router, F, Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -21,7 +23,7 @@ _customer_notifier_bot = None
 def get_customer_bot() -> Bot:
     global _customer_notifier_bot
     if _customer_notifier_bot is None:
-        _customer_notifier_bot = Bot(token=BOT_TOKEN)
+        _customer_notifier_bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     return _customer_notifier_bot
 
 
@@ -114,21 +116,30 @@ class RequiredChannel(StatesGroup):
 
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Kategoriya qo'shish", callback_data="admin:add_cat", style="primary")],
-        [InlineKeyboardButton(text="📂 Kategoriyalarni boshqarish", callback_data="admin:categories", style="success")],
-        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin:users", style="success")],
-        [InlineKeyboardButton(text="📈 Nakrutka xizmatlari", callback_data="admin:smm", style="success")],
-        [InlineKeyboardButton(text="🔥 Top takliflar sozlamasi", callback_data="admin:top_settings", style="success")],
-        [InlineKeyboardButton(text="💵 Kurs va ustama", callback_data="admin:currency_settings", style="success")],
-        [InlineKeyboardButton(text="💳 To'lov sozlamalari", callback_data="admin:payment_settings", style="success")],
-        [InlineKeyboardButton(text="🔒 Majburiy obuna", callback_data="admin:required_channel", style="success")],
-        [InlineKeyboardButton(text="🎟 Promokodlar", callback_data="admin:promos", style="success")],
-        [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin:broadcast", style="success")],
-        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin:stats", style="success")],
-        [InlineKeyboardButton(text="🎨 Emoji sozlamalari", callback_data="admin:emojis", style="success")],
-        [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="admin:settings", style="success")],
-    ])
+    items = [
+        ("➕ Kategoriya qo'shish", "admin:add_cat", "primary"),
+        ("📂 Kategoriyalarni boshqarish", "admin:categories", "success"),
+        ("👥 Foydalanuvchilar", "admin:users", "success"),
+        ("📈 Nakrutka xizmatlari", "admin:smm", "success"),
+        ("🔥 Top takliflar sozlamasi", "admin:top_settings", "success"),
+        ("💵 Kurs va ustama", "admin:currency_settings", "success"),
+        ("💳 To'lov sozlamalari", "admin:payment_settings", "success"),
+        ("🔒 Majburiy obuna", "admin:required_channel", "success"),
+        ("🎟 Promokodlar", "admin:promos", "success"),
+        ("📢 Reklama yuborish", "admin:broadcast", "success"),
+        ("📊 Statistika", "admin:stats", "success"),
+        ("🎨 Emoji sozlamalari", "admin:emojis", "success"),
+        ("⚙️ Sozlamalar", "admin:settings", "success"),
+    ]
+    rows = []
+    for i in range(0, len(items), 2):
+        pair = items[i:i + 2]
+        rows.append([
+            InlineKeyboardButton(text=text, callback_data=cb, style=style)
+            for text, cb, style in pair
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 
 @router.message(Command("admin"))
@@ -538,35 +549,60 @@ async def broadcast_start(callback: CallbackQuery, state: FSMContext):
 async def broadcast_received(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    await state.update_data(chat_id=message.chat.id, message_id=message.message_id)
+
+    # Xabar TARKIBINI (matn/rasm/video/fayl) saqlaymiz - forward/copy EMAS,
+    # chunki reklama mijozlar botidan yuborilishi kerak, admin bot orqali
+    # forward/copy qilib bo'lmaydi (mijozlar admin botni ishga tushirmagan).
+    content = {}
+    if message.photo:
+        content = {"type": "photo", "file_id": message.photo[-1].file_id, "caption": message.caption or ""}
+    elif message.video:
+        content = {"type": "video", "file_id": message.video.file_id, "caption": message.caption or ""}
+    elif message.document:
+        content = {"type": "document", "file_id": message.document.file_id, "caption": message.caption or ""}
+    elif message.text:
+        content = {"type": "text", "text": message.text}
+    else:
+        await message.answer("❗️ Bu turdagi xabarni yuborib bo'lmaydi. Matn, rasm, video yoki fayl yuboring.")
+        return
+
+    await state.update_data(broadcast_content=content)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="↪️ Forward qilib yuborish", callback_data="admin:bcast_forward", style="primary")],
-        [InlineKeyboardButton(text="📋 Nusxa sifatida (forwardsiz)", callback_data="admin:bcast_copy", style="success")],
+        [InlineKeyboardButton(text="📤 Barchaga yuborish", callback_data="admin:bcast_send", style="success")],
         [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")],
     ])
-    await message.answer("Qanday yuborilsin?", reply_markup=kb)
+    await message.answer("Shu ko'rinishda barcha foydalanuvchilarga yuborilsinmi?", reply_markup=kb)
 
 
-@router.callback_query(F.data.in_(["admin:bcast_forward", "admin:bcast_copy"]))
-async def broadcast_send(callback: CallbackQuery, state: FSMContext, bot: Bot):
+@router.callback_query(F.data == "admin:bcast_send")
+async def broadcast_send(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     data = await state.get_data()
-    chat_id, message_id = data["chat_id"], data["message_id"]
-    forward = callback.data == "admin:bcast_forward"
+    content = data.get("broadcast_content")
     await state.clear()
+
+    if not content:
+        await callback.answer("Xatolik: kontent topilmadi.", show_alert=True)
+        return
 
     await callback.message.edit_text("⏳ Yuborilmoqda, kuting...")
     await callback.answer()
 
+    customer_bot = get_customer_bot()
     user_ids = db.get_all_user_ids()
     success, failed = 0, 0
+
     for uid in user_ids:
         try:
-            if forward:
-                await bot.forward_message(chat_id=uid, from_chat_id=chat_id, message_id=message_id)
-            else:
-                await bot.copy_message(chat_id=uid, from_chat_id=chat_id, message_id=message_id)
+            if content["type"] == "text":
+                await customer_bot.send_message(uid, content["text"])
+            elif content["type"] == "photo":
+                await customer_bot.send_photo(uid, content["file_id"], caption=content.get("caption") or None)
+            elif content["type"] == "video":
+                await customer_bot.send_video(uid, content["file_id"], caption=content.get("caption") or None)
+            elif content["type"] == "document":
+                await customer_bot.send_document(uid, content["file_id"], caption=content.get("caption") or None)
             success += 1
         except Exception:
             failed += 1
@@ -1469,14 +1505,16 @@ async def finalize_smm_add(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
     data = await state.get_data()
+    category_id = data["category_id"]
     db.add_smm_service(
-        data["category_id"], data["panel_service_id"], data["name"],
+        category_id, data["panel_service_id"], data["name"],
         data["price"], data["min_qty"], data["max_qty"], data.get("average_time", "")
     )
     await state.clear()
-    await callback.message.edit_text(f"✅ «{data['name']}» xizmati qo'shildi.")
-    await callback.answer()
-    await callback.message.answer("🛠 Admin panel:", reply_markup=admin_menu_kb())
+    await callback.answer(f"✅ «{data['name']}» xizmati qo'shildi.", show_alert=True)
+    fake_data = f"admin:smmcategory:{category_id}"
+    callback.data = fake_data
+    await manage_smm_category(callback)
 
 
 # ---------- DOLLAR KURSI VA USTAMA SOZLAMALARI ----------
