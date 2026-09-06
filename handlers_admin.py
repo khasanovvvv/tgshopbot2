@@ -1,8 +1,9 @@
 # handlers_admin.py
+import logging
 from aiogram import Router, F, Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -546,24 +547,35 @@ async def broadcast_start(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(BroadcastState.waiting_content)
-async def broadcast_received(message: Message, state: FSMContext):
+async def broadcast_received(message: Message, state: FSMContext, bot: Bot):
     if not is_admin(message.from_user.id):
         return
 
-    # Xabar TARKIBINI (matn/rasm/video/fayl) saqlaymiz - forward/copy EMAS,
-    # chunki reklama mijozlar botidan yuborilishi kerak, admin bot orqali
-    # forward/copy qilib bo'lmaydi (mijozlar admin botni ishga tushirmagan).
+    # Xabar TARKIBINI saqlaymiz - forward/copy EMAS, chunki reklama mijozlar
+    # botidan yuborilishi kerak. Rasm/video/fayllarning file_id'si botlar
+    # orasida ishlamaydi, shuning uchun ularni HOZIROQ yuklab olamiz (bytes),
+    # keyin mijozlar boti orqali qayta yuklab yuboramiz.
     content = {}
-    if message.photo:
-        content = {"type": "photo", "file_id": message.photo[-1].file_id, "caption": message.caption or ""}
-    elif message.video:
-        content = {"type": "video", "file_id": message.video.file_id, "caption": message.caption or ""}
-    elif message.document:
-        content = {"type": "document", "file_id": message.document.file_id, "caption": message.caption or ""}
-    elif message.text:
-        content = {"type": "text", "text": message.text}
-    else:
-        await message.answer("❗️ Bu turdagi xabarni yuborib bo'lmaydi. Matn, rasm, video yoki fayl yuboring.")
+    try:
+        if message.photo:
+            file_bytes = await bot.download(message.photo[-1].file_id)
+            content = {"type": "photo", "data": file_bytes.read(), "caption": message.caption or ""}
+        elif message.video:
+            file_bytes = await bot.download(message.video.file_id)
+            content = {"type": "video", "data": file_bytes.read(), "caption": message.caption or ""}
+        elif message.document:
+            file_bytes = await bot.download(message.document.file_id)
+            content = {
+                "type": "document", "data": file_bytes.read(),
+                "caption": message.caption or "", "filename": message.document.file_name or "file"
+            }
+        elif message.text:
+            content = {"type": "text", "text": message.text}
+        else:
+            await message.answer("❗️ Bu turdagi xabarni yuborib bo'lmaydi. Matn, rasm, video yoki fayl yuboring.")
+            return
+    except Exception as e:
+        await message.answer(f"❌ Faylni yuklashda xatolik: {e}")
         return
 
     await state.update_data(broadcast_content=content)
@@ -598,11 +610,14 @@ async def broadcast_send(callback: CallbackQuery, state: FSMContext):
             if content["type"] == "text":
                 await customer_bot.send_message(uid, content["text"])
             elif content["type"] == "photo":
-                await customer_bot.send_photo(uid, content["file_id"], caption=content.get("caption") or None)
+                photo = BufferedInputFile(content["data"], filename="photo.jpg")
+                await customer_bot.send_photo(uid, photo, caption=content.get("caption") or None)
             elif content["type"] == "video":
-                await customer_bot.send_video(uid, content["file_id"], caption=content.get("caption") or None)
+                video = BufferedInputFile(content["data"], filename="video.mp4")
+                await customer_bot.send_video(uid, video, caption=content.get("caption") or None)
             elif content["type"] == "document":
-                await customer_bot.send_document(uid, content["file_id"], caption=content.get("caption") or None)
+                doc = BufferedInputFile(content["data"], filename=content.get("filename", "file"))
+                await customer_bot.send_document(uid, doc, caption=content.get("caption") or None)
             success += 1
         except Exception:
             failed += 1
@@ -701,17 +716,24 @@ async def topup_approve(callback: CallbackQuery, bot: Bot):
     new_balance = db.add_balance(topup["user_id"], topup["amount"])
     db.set_topup_status(topup_id, "approved")
 
-    await callback.message.edit_caption(
-        caption=callback.message.caption + "\n\n✅ TASDIQLANDI",
-        reply_markup=None
-    )
+    try:
+        await callback.message.edit_caption(
+            caption=(callback.message.caption or "") + "\n\n✅ TASDIQLANDI",
+            reply_markup=None
+        )
+    except Exception:
+        pass
     await callback.answer("Tasdiqlandi ✅")
 
-    await bot.send_message(
-        topup["user_id"],
-        f"✅ Balansingiz {topup['amount']:,} so'mga to'ldirildi!\n\n".replace(",", " ") +
-        f"💰 Joriy balans: {new_balance:,} so'm".replace(",", " ")
-    )
+    customer_bot = get_customer_bot()
+    try:
+        await customer_bot.send_message(
+            topup["user_id"],
+            f"✅ Balansingiz {topup['amount']:,} so'mga to'ldirildi!\n\n".replace(",", " ") +
+            f"💰 Joriy balans: {new_balance:,} so'm".replace(",", " ")
+        )
+    except Exception as e:
+        logging.getLogger("admin_notify").error(f"Mijozga topup xabari yuborilmadi: {e}")
 
 
 @router.callback_query(F.data.startswith("topup_no:"))
@@ -727,13 +749,20 @@ async def topup_decline(callback: CallbackQuery, bot: Bot):
 
     db.set_topup_status(topup_id, "declined")
 
-    await callback.message.edit_caption(
-        caption=callback.message.caption + "\n\n❌ RAD ETILDI",
-        reply_markup=None
-    )
+    try:
+        await callback.message.edit_caption(
+            caption=(callback.message.caption or "") + "\n\n❌ RAD ETILDI",
+            reply_markup=None
+        )
+    except Exception:
+        pass
     await callback.answer("Rad etildi")
 
-    await bot.send_message(topup["user_id"], "⚠️ To'lovingiz bekor qilindi.")
+    customer_bot = get_customer_bot()
+    try:
+        await customer_bot.send_message(topup["user_id"], "⚠️ To'lovingiz bekor qilindi.")
+    except Exception as e:
+        logging.getLogger("admin_notify").error(f"Mijozga topup xabari yuborilmadi: {e}")
 
 
 # ---------- FOYDALANUVCHILARNI BOSHQARISH ----------
@@ -748,7 +777,7 @@ async def users_start(callback: CallbackQuery, state: FSMContext):
     ])
     await callback.message.edit_text(
         f"👥 Jami foydalanuvchilar: {user_count}\n\n"
-        "⭐ Kerakli foydalanuvchining ID raqamini kiriting:",
+        "⭐ Kerakli foydalanuvchining ID raqamini yoki @username'ini kiriting:",
         reply_markup=kb
     )
     await callback.answer()
@@ -758,19 +787,27 @@ async def users_start(callback: CallbackQuery, state: FSMContext):
 async def users_find(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    if not message.text.strip().isdigit():
-        await message.answer("❗️ Iltimos, faqat ID raqamini kiriting.")
-        return
 
-    user_id = int(message.text.strip())
-    user = db.get_user(user_id)
-    await state.clear()
+    query = message.text.strip()
+
+    if query.lstrip("-").isdigit():
+        user = db.get_user(int(query))
+    else:
+        user = db.get_user_by_username(query)
 
     if not user:
-        await message.answer("❌ Bunday foydalanuvchi topilmadi.", reply_markup=admin_menu_kb())
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")]
+        ])
+        await message.answer(
+            "❌ Bunday foydalanuvchi topilmadi.\n\n"
+            "Qayta urinib ko'ring (ID raqami yoki @username):",
+            reply_markup=kb
+        )
         return
 
-    await show_user_card(message, user_id)
+    await state.clear()
+    await show_user_card(message, user["user_id"])
 
 
 async def show_user_card(message: Message, user_id: int):
