@@ -906,13 +906,14 @@ async def adjust_balance_finish(message: Message, state: FSMContext, bot: Bot):
         reply_markup=admin_menu_kb()
     )
 
+    customer_bot = get_customer_bot()
     try:
         if mode == "add":
-            await bot.send_message(user_id, f"💰 Balansingizga {amount:,} so'm qo'shildi.".replace(",", " "))
+            await customer_bot.send_message(user_id, f"💰 Balansingizga {amount:,} so'm qo'shildi.".replace(",", " "))
         else:
-            await bot.send_message(user_id, f"💰 Balansingizdan {amount:,} so'm ayirildi.".replace(",", " "))
-    except Exception:
-        pass
+            await customer_bot.send_message(user_id, f"💰 Balansingizdan {amount:,} so'm ayirildi.".replace(",", " "))
+    except Exception as e:
+        logging.getLogger("admin_notify").error(f"Mijozga balans xabari yuborilmadi: {e}")
 
 
 # ---------- TO'LOV SOZLAMALARI ----------
