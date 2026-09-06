@@ -705,64 +705,80 @@ async def stats_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("topup_ok:"))
 async def topup_approve(callback: CallbackQuery, bot: Bot):
     if not is_admin(callback.from_user.id):
+        await callback.answer()
         return
-    topup_id = int(callback.data.split(":")[1])
-    topup = db.get_topup(topup_id)
-
-    if not topup or topup["status"] != "pending":
-        await callback.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
-        return
-
-    new_balance = db.add_balance(topup["user_id"], topup["amount"])
-    db.set_topup_status(topup_id, "approved")
-
     try:
-        await callback.message.edit_caption(
-            caption=(callback.message.caption or "") + "\n\n✅ TASDIQLANDI",
-            reply_markup=None
-        )
-    except Exception:
-        pass
-    await callback.answer("Tasdiqlandi ✅")
+        topup_id = int(callback.data.split(":")[1])
+        topup = db.get_topup(topup_id)
 
-    customer_bot = get_customer_bot()
-    try:
-        await customer_bot.send_message(
-            topup["user_id"],
-            f"✅ Balansingiz {topup['amount']:,} so'mga to'ldirildi!\n\n".replace(",", " ") +
-            f"💰 Joriy balans: {new_balance:,} so'm".replace(",", " ")
-        )
+        if not topup or topup["status"] != "pending":
+            await callback.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
+            return
+
+        new_balance = db.add_balance(topup["user_id"], topup["amount"])
+        db.set_topup_status(topup_id, "approved")
+
+        try:
+            await callback.message.edit_caption(
+                caption=(callback.message.caption or "") + "\n\n✅ TASDIQLANDI",
+                reply_markup=None
+            )
+        except Exception:
+            pass
+        await callback.answer("Tasdiqlandi ✅")
+
+        customer_bot = get_customer_bot()
+        try:
+            await customer_bot.send_message(
+                topup["user_id"],
+                f"✅ Balansingiz {topup['amount']:,} so'mga to'ldirildi!\n\n".replace(",", " ") +
+                f"💰 Joriy balans: {new_balance:,} so'm".replace(",", " ")
+            )
+        except Exception as e:
+            logging.getLogger("admin_notify").error(f"Mijozga topup xabari yuborilmadi: {e}")
     except Exception as e:
-        logging.getLogger("admin_notify").error(f"Mijozga topup xabari yuborilmadi: {e}")
+        logging.getLogger("admin_notify").error(f"topup_approve xatosi: {e}")
+        try:
+            await callback.answer(f"❌ Xatolik: {e}", show_alert=True)
+        except Exception:
+            pass
 
 
 @router.callback_query(F.data.startswith("topup_no:"))
 async def topup_decline(callback: CallbackQuery, bot: Bot):
     if not is_admin(callback.from_user.id):
+        await callback.answer()
         return
-    topup_id = int(callback.data.split(":")[1])
-    topup = db.get_topup(topup_id)
-
-    if not topup or topup["status"] != "pending":
-        await callback.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
-        return
-
-    db.set_topup_status(topup_id, "declined")
-
     try:
-        await callback.message.edit_caption(
-            caption=(callback.message.caption or "") + "\n\n❌ RAD ETILDI",
-            reply_markup=None
-        )
-    except Exception:
-        pass
-    await callback.answer("Rad etildi")
+        topup_id = int(callback.data.split(":")[1])
+        topup = db.get_topup(topup_id)
 
-    customer_bot = get_customer_bot()
-    try:
-        await customer_bot.send_message(topup["user_id"], "⚠️ To'lovingiz bekor qilindi.")
+        if not topup or topup["status"] != "pending":
+            await callback.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
+            return
+
+        db.set_topup_status(topup_id, "declined")
+
+        try:
+            await callback.message.edit_caption(
+                caption=(callback.message.caption or "") + "\n\n❌ RAD ETILDI",
+                reply_markup=None
+            )
+        except Exception:
+            pass
+        await callback.answer("Rad etildi")
+
+        customer_bot = get_customer_bot()
+        try:
+            await customer_bot.send_message(topup["user_id"], "⚠️ To'lovingiz bekor qilindi.")
+        except Exception as e:
+            logging.getLogger("admin_notify").error(f"Mijozga topup xabari yuborilmadi: {e}")
     except Exception as e:
-        logging.getLogger("admin_notify").error(f"Mijozga topup xabari yuborilmadi: {e}")
+        logging.getLogger("admin_notify").error(f"topup_decline xatosi: {e}")
+        try:
+            await callback.answer(f"❌ Xatolik: {e}", show_alert=True)
+        except Exception:
+            pass
 
 
 # ---------- FOYDALANUVCHILARNI BOSHQARISH ----------
