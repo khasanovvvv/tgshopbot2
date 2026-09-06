@@ -250,6 +250,16 @@ def get_user(user_id: int):
     return row
 
 
+def get_user_by_username(username: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(%s)", (username.lstrip("@"),))
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row
+
+
 def has_phone(user_id: int) -> bool:
     user = get_user(user_id)
     return bool(user and user["phone"])
