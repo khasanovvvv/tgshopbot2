@@ -84,6 +84,10 @@ class SmmOrderState(StatesGroup):
     confirming = State()
 
 
+class MurojaatState(StatesGroup):
+    waiting_message = State()
+
+
 # ---------- Premium (maxsus animatsion) emojilar ----------
 CUSTOM_EMOJI = {
     "wave": "5472235990955334730",       # 👋
@@ -104,32 +108,25 @@ def tge(name: str, fallback: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
 
 
-# ---------- ASOSIY MENYU ----------
-def main_menu_kb() -> InlineKeyboardMarkup:
-    channel_url = db.get_setting("channel_url")
-    e_services = db.get_setting("emoji_services") or "🛍"
-    e_contact = db.get_setting("emoji_contact") or "👨‍💻"
-    e_channel = db.get_setting("emoji_channel") or "📢"
-    e_top = db.get_setting("emoji_top") or "🔥"
-    top_enabled = db.get_setting("top_offers_enabled") == "1"
+# ---------- ASOSIY MENYU (doimiy, pastdagi tugmalar) ----------
+BTN_SERVICES = "🛍 Xizmatlar"
+BTN_MY_ORDERS = "🧾 Buyurtmalarim"
+BTN_BALANCE = "💰 Hisobim"
+BTN_TOPUP = "💳 Hisobni to'ldirish"
+BTN_ADMIN = "👨‍💻 Admin"
+BTN_SUPPORT = "✉️ Murojaat"
 
-    row1 = [InlineKeyboardButton(text=f"{e_services} Xizmatlar", callback_data="menu:services", style="primary")]
-    if top_enabled:
-        row1.append(InlineKeyboardButton(text=f"{e_top} Top takliflar", callback_data="menu:top", style="danger"))
 
-    rows = [
-        row1,
-        [
-            InlineKeyboardButton(text="📈 Nakrutka xizmati", callback_data="menu:smm", style="primary"),
-            InlineKeyboardButton(text="🧾 Buyurtmalarim", callback_data="menu:myorders", style="primary"),
+def main_reply_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_SERVICES), KeyboardButton(text=BTN_MY_ORDERS)],
+            [KeyboardButton(text=BTN_BALANCE), KeyboardButton(text=BTN_TOPUP)],
+            [KeyboardButton(text=BTN_ADMIN), KeyboardButton(text=BTN_SUPPORT)],
         ],
-        [
-            InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary"),
-            InlineKeyboardButton(text=f"{e_contact} Admin bilan aloqa", callback_data="menu:contact", style="success"),
-        ],
-        [InlineKeyboardButton(text=f"{e_channel} Bizning kanal", url=channel_url)],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def back_button(callback_data: str) -> InlineKeyboardButton:
@@ -204,7 +201,7 @@ router.callback_query.middleware(SubscriptionMiddleware())
 async def check_subscription_cb(callback: CallbackQuery, bot: Bot):
     if await is_subscribed(bot, callback.from_user.id):
         await callback.message.delete()
-        await callback.message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+        await callback.message.answer(WELCOME_TEXT, reply_markup=main_reply_kb())
     else:
         await callback.answer("❗️ Hali kanalga a'zo bo'lmagansiz.", show_alert=True)
 
@@ -243,7 +240,7 @@ async def open_start_target(message: Message, state: FSMContext):
                 await send_smm_service_card(message, int(service_id))
                 return
 
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+    await message.answer(WELCOME_TEXT, reply_markup=main_reply_kb())
 
 
 @router.message(F.contact)
@@ -269,7 +266,13 @@ async def contact_received(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "menu:main")
 async def back_to_main(callback: CallbackQuery):
-    await callback.message.edit_text(WELCOME_TEXT, reply_markup=main_menu_kb())
+    try:
+        await callback.message.edit_text(
+            "🏠 Asosiy menyu — pastdagi tugmalardan foydalaning 👇",
+            reply_markup=None
+        )
+    except Exception:
+        pass
     await callback.answer()
 
 
@@ -277,30 +280,34 @@ def build_contact_admin_content():
     admin_username = db.get_setting("admin_username")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Admin bilan yozish", url=f"https://t.me/{admin_username.lstrip('@')}", style="success")],
-        [back_button("menu:main")],
     ])
     return f"Admin bilan bog'lanish uchun: {admin_username}", kb
 
 
-@router.callback_query(F.data == "menu:contact")
-async def contact_admin(callback: CallbackQuery):
+@router.message(F.text == BTN_ADMIN)
+async def contact_admin_button(message: Message):
     text, kb = build_contact_admin_content()
-    await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
+    await message.answer(text, reply_markup=kb)
 
 
 # ---------- BALANSNI TO'LDIRISH ----------
 def build_topup_content(user_id: int):
     min_amount = db.get_setting("payment_min_amount") or "1000"
     balance = db.get_balance(user_id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
     text = (
         f"💰 Joriy balansingiz: <b>{balance:,} so'm</b>\n\n".replace(",", " ") +
         "💳 To'lov usuli: Uzcard/Humo (avto)\n\n"
         "💵 To'lov miqdorini kiriting:\n"
         f"⏩ Minimal: {int(min_amount):,} so'm".replace(",", " ")
     )
-    return text, kb
+    return text, None
+
+
+@router.message(F.text == BTN_TOPUP)
+async def topup_button(message: Message, state: FSMContext):
+    await state.set_state(TopupState.waiting_amount)
+    text, kb = build_topup_content(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "menu:topup")
@@ -309,6 +316,22 @@ async def topup_start(callback: CallbackQuery, state: FSMContext):
     text, kb = build_topup_content(callback.from_user.id)
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+# ---------- HISOBIM ----------
+@router.message(F.text == BTN_BALANCE)
+async def balance_button(message: Message):
+    balance = db.get_balance(message.from_user.id)
+    order_count = len(db.get_user_orders(message.from_user.id))
+    text = (
+        "💰 <b>Hisobim</b>\n\n"
+        f"Joriy balans: <b>{balance:,} so'm</b>\n".replace(",", " ") +
+        f"Jami buyurtmalar: {order_count} ta"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Hisobni to'ldirish", callback_data="menu:topup", style="primary")]
+    ])
+    await message.answer(text, reply_markup=kb)
 
 
 @router.message(TopupState.waiting_amount)
@@ -382,12 +405,51 @@ async def topup_receipt_invalid(message: Message):
 
 
 # ---------- XIZMATLAR (KATEGORIYALAR) ----------
+async def build_services_screen():
+    """Xizmatlar (asosiy) ekrani: nakrutka platformalari + Premium xizmatlarga
+    o'tuvchi maxsus (admin tomonidan tahrirlanadigan nomli) tugma."""
+    platforms = db.get_platforms()
+
+    buttons = []
+    row = []
+    for p in platforms:
+        row.append(InlineKeyboardButton(
+            text=f"{p['emoji']} {p['name']}", callback_data=f"smmcat:{p['id']}", style="success"
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    items_label = db.get_setting("items_button_label") or "⭐ Telegram xizmatlar"
+    buttons.append([InlineKeyboardButton(text=items_label, callback_data="menu:items", style="primary")])
+
+    if db.get_setting("top_offers_enabled") == "1":
+        buttons.append([InlineKeyboardButton(text=f"{tge('fire', '🔥')} Top takliflar", callback_data="menu:top", style="danger")])
+
+    return "🛍 Kerakli xizmatni tanlang:", InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.message(F.text == BTN_SERVICES)
+async def services_button(message: Message):
+    text, kb = await build_services_screen()
+    await message.answer(text, reply_markup=kb)
+
+
 @router.callback_query(F.data == "menu:services")
+async def services_callback(callback: CallbackQuery):
+    text, kb = await build_services_screen()
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:items")
 async def show_categories(callback: CallbackQuery):
     categories = db.get_categories()
 
     if not categories:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:main")]])
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:services")]])
         await callback.message.edit_text(
             f"Hozircha xizmatlar qo'shilmagan. Tez orada qo'shiladi. {tge('soon', '🔜')}",
             reply_markup=kb
@@ -399,7 +461,7 @@ async def show_categories(callback: CallbackQuery):
         [InlineKeyboardButton(text=cat["name"], callback_data=f"cat:{cat['id']}", style="success")]
         for cat in categories
     ]
-    buttons.append([back_button("menu:main")])
+    buttons.append([back_button("menu:services")])
 
     header = f"{tge('new', '🆕')} Kerakli xizmat turini tanlang:"
     await callback.message.edit_text(
@@ -519,4 +581,523 @@ async def promo_start(callback: CallbackQuery, state: FSMContext):
 @router.message(PromoState.waiting_code)
 async def promo_check(message: Message, state: FSMContext):
     data = await state.get_data()
-    item_id = d
+    item_id = data["item_id"]
+    item = db.get_item(item_id)
+    promo = db.get_promocode(message.text.strip())
+
+    if not item:
+        await state.clear()
+        await message.answer("Xizmat topilmadi.")
+        return
+
+    if not promo:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button(f"item:{item_id}")]])
+        await message.answer("❌ Bunday promokod topilmadi yoki faol emas.", reply_markup=kb)
+        return
+
+    new_price = max(0, item["price"] - promo["discount"])
+    await state.clear()
+
+    text = (
+        f"🎟 Promokod qo'llandi!\n\n"
+        f"📦 {item['name']}\n"
+        f"~{item['price']:,} so'm~ → ".replace(",", " ") +
+        f"<b>{new_price:,} so'm</b>\n\n".replace(",", " ") +
+        f"Chegirma: {promo['discount']:,} so'm".replace(",", " ")
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Buyurtma berish (chegirma bilan)",
+            callback_data=f"orderpromo:{item_id}:{promo['code']}",
+            style="success"
+        )],
+        [back_button(f"item:{item_id}")],
+    ])
+    await message.answer(text, reply_markup=kb)
+
+
+# ---------- BUYURTMA BERISH (ODDIY) ----------
+@router.callback_query(F.data.startswith("order:"))
+async def make_order(callback: CallbackQuery):
+    item_id = int(callback.data.split(":")[1])
+    item = db.get_item(item_id)
+    await show_order_confirmation(callback, item, item["price"], f"orderconfirm:{item_id}")
+
+
+# ---------- BUYURTMA BERISH (PROMOKOD BILAN) ----------
+@router.callback_query(F.data.startswith("orderpromo:"))
+async def make_order_promo(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    item_id, code = int(parts[1]), parts[2]
+    item = db.get_item(item_id)
+    promo = db.get_promocode(code)
+    final_price = max(0, item["price"] - promo["discount"]) if promo else item["price"]
+    await show_order_confirmation(callback, item, final_price, f"orderpromoconfirm:{item_id}:{code}")
+
+
+async def show_order_confirmation(callback: CallbackQuery, item, final_price: int, confirm_callback: str):
+    balance = db.get_balance(callback.from_user.id)
+    text = (
+        f"📦 {item['name']}\n\n"
+        f"💵 Hisobingizdan <b>{final_price:,} so'm</b> yechib olinadi.\n".replace(",", " ") +
+        f"💰 Joriy balansingiz: {balance:,} so'm\n\n".replace(",", " ") +
+        "Tasdiqlaysizmi?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Ha, tasdiqlayman", callback_data=confirm_callback, style="success"),
+            InlineKeyboardButton(text="❌ Yo'q", callback_data=f"item:{item['id']}", style="danger"),
+        ]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("orderconfirm:"))
+async def make_order_confirmed(callback: CallbackQuery, bot: Bot):
+    item_id = int(callback.data.split(":")[1])
+    item = db.get_item(item_id)
+    await process_order(callback, bot, item, item["price"], None)
+
+
+@router.callback_query(F.data.startswith("orderpromoconfirm:"))
+async def make_order_promo_confirmed(callback: CallbackQuery, bot: Bot):
+    parts = callback.data.split(":")
+    item_id, code = int(parts[1]), parts[2]
+    item = db.get_item(item_id)
+    promo = db.get_promocode(code)
+    final_price = max(0, item["price"] - promo["discount"]) if promo else item["price"]
+    await process_order(callback, bot, item, final_price, code)
+
+
+async def process_order(callback: CallbackQuery, bot: Bot, item, final_price: int, promo_code):
+    user = callback.from_user
+    balance = db.get_balance(user.id)
+
+    if balance < final_price:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")]
+        ])
+        await callback.message.edit_text(
+            f"❌ Balansingiz yetarli emas.\n\n"
+            f"Kerak: {final_price:,} so'm\n".replace(",", " ") +
+            f"Sizda: {balance:,} so'm".replace(",", " "),
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    db.add_balance(user.id, -final_price)
+    order_id = await send_order_notification(bot, user, item, final_price, promo_code)
+    await callback.answer("Buyurtmangiz qabul qilindi!", show_alert=False)
+    await send_order_confirmation(bot, user.id, item, final_price, order_id)
+
+
+async def send_order_notification(bot: Bot, user, item, final_price: int, promo_code):
+    order_id = db.log_order(item["id"], user.id, final_price, promo_code, order_type="item", item_name=item["name"])
+
+    username_part = f"@{user.username}" if user.username else "username yo'q"
+    text = (
+        "🆕 Yangi buyurtma!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n\n"
+        f"👤 Foydalanuvchi: {user.full_name} ({username_part})\n"
+        f"🆔 Foydalanuvchi ID: {user.id}\n\n"
+        f"📦 Xizmat: {item['name']}\n"
+        f"💵 Narxi: {final_price:,} so'm".replace(",", " ") +
+        "\n💰 Balansdan avtomatik yechildi.\n\n" +
+        "⚠️ Tasdiqlaysizmi? (Bekor qilsangiz, mijozga pul avtomatik qaytariladi)"
+    )
+    if promo_code:
+        text += f"\n🎟 Promokod: {promo_code}"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"order_confirm:{order_id}", style="success"),
+            InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"order_cancel:{order_id}", style="danger"),
+        ]
+    ])
+    await notify_admin_text(bot, text, reply_markup=kb)
+    return order_id
+
+
+async def send_order_confirmation(bot: Bot, user_id: int, item, final_price: int, order_id: int):
+    text = (
+        f"{tge('check', '✔️')} Buyurtmangiz qabul qilindi!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n"
+        f"📦 {item['name']} — {final_price:,} so'm".replace(",", " ") + "\n\n"
+        "Tez orada admin siz bilan bog'lanadi.\n"
+        "Holatini «🧾 Buyurtmalarim» bo'limidan kuzatib borishingiz mumkin."
+    )
+    await bot.send_message(user_id, text)
+
+
+# ---------- NAKRUTKA (SMM) XIZMATLARI ----------
+# ---------- NAKRUTKA (SMM) XIZMATLARI ----------
+# Platformalar endi to'g'ridan-to'g'ri "Xizmatlar" ekranida (build_services_screen)
+# ko'rsatiladi, shuning uchun alohida "menu:smm" ekrani kerak emas.
+
+
+@router.callback_query(F.data.startswith("smmcat:"))
+async def show_smm_categories(callback: CallbackQuery):
+    platform_id = int(callback.data.split(":")[1])
+    platform = db.get_platform(platform_id)
+    categories = db.get_smm_categories(platform_id)
+
+    if not categories:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button("menu:services")]])
+        await callback.message.edit_text(
+            f"«{platform['name']}» uchun hozircha kategoriya yo'q.",
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    buttons = [
+        [InlineKeyboardButton(text=f"📂 {c['name']}", callback_data=f"smmsubcat:{c['id']}", style="success")]
+        for c in categories
+    ]
+    buttons.append([back_button("menu:services")])
+
+    await callback.message.edit_text(
+        f"{platform['emoji']} {platform['name']} — kategoriyani tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("smmsubcat:"))
+async def show_smm_services(callback: CallbackQuery):
+    category_id = int(callback.data.split(":")[1])
+    category = db.get_smm_category(category_id)
+    platform = db.get_platform(category["platform_id"])
+    services = db.get_smm_services_by_category(category_id)
+
+    if not services:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[back_button(f"smmcat:{category['platform_id']}")]])
+        await callback.message.edit_text(
+            f"«{category['name']}» uchun hozircha xizmatlar yo'q.",
+            reply_markup=kb
+        )
+        await callback.answer()
+        return
+
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"{s['name']} — {s['price_per_1000']:,} so'm/1000".replace(",", " "),
+            callback_data=f"smmservice:{s['id']}",
+            style="success"
+        )]
+        for s in services
+    ]
+    buttons.append([back_button(f"smmcat:{category['platform_id']}")])
+
+    await callback.message.edit_text(
+        f"{platform['emoji']} {platform['name']} / 📂 {category['name']}:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+    await callback.answer()
+
+
+def build_smm_service_card(service, bot_username: str):
+    text = (
+        f"📦 {service['name']}\n\n"
+        f"💵 Narxi: {service['price_per_1000']:,} so'm / 1000 dona\n".replace(",", " ") +
+        f"🔽 Minimal: {service['min_qty']} — 🔼 Maksimal: {service['max_qty']}"
+    )
+    if service["average_time"]:
+        text += f"\n⏰ Bajarilish vaqti: {service['average_time']}"
+    share_link = f"https://t.me/{bot_username}?start=smmservice_{service['id']}"
+    share_url = f"https://t.me/share/url?url={share_link}&text={service['name']}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↗️ Ulashish", url=share_url)],
+        [InlineKeyboardButton(text="✅ Buyurtma berish", callback_data=f"smmorder:{service['id']}", style="success")],
+        [back_button(f"smmsubcat:{service['category_id']}")],
+    ])
+    return text, kb
+
+
+async def send_smm_service_card(message: Message, service_id: int, bot: Bot = None):
+    service = db.get_smm_service(service_id)
+    if not service:
+        await message.answer("❌ Bunday xizmat topilmadi.", reply_markup=main_reply_kb())
+        return
+    me = await message.bot.get_me()
+    text, kb = build_smm_service_card(service, me.username)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("smmservice:"))
+async def smm_service_info(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    service_id = int(callback.data.split(":")[1])
+    service = db.get_smm_service(service_id)
+    me = await bot.get_me()
+    text, kb = build_smm_service_card(service, me.username)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("smmorder:"))
+async def smm_order_start(callback: CallbackQuery, state: FSMContext):
+    service_id = int(callback.data.split(":")[1])
+    await state.update_data(service_id=service_id)
+    await state.set_state(SmmOrderState.waiting_link)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[back_button(f"smmservice:{service_id}")]])
+    await callback.message.edit_text(
+        "🔗 Havola yoki username yuboring (masalan: https://t.me/kanal):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(SmmOrderState.waiting_link)
+async def smm_order_link(message: Message, state: FSMContext):
+    await state.update_data(link=message.text.strip())
+    data = await state.get_data()
+    service = db.get_smm_service(data["service_id"])
+    await state.set_state(SmmOrderState.waiting_quantity)
+    await message.answer(
+        f"🔢 Miqdorni kiriting (raqam):\n"
+        f"Minimal: {service['min_qty']} — Maksimal: {service['max_qty']}"
+    )
+
+
+@router.message(SmmOrderState.waiting_quantity)
+async def smm_order_quantity(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+
+    quantity = int(message.text.strip())
+    data = await state.get_data()
+    service = db.get_smm_service(data["service_id"])
+
+    if quantity < service["min_qty"] or quantity > service["max_qty"]:
+        await message.answer(
+            f"❗️ Miqdor {service['min_qty']} dan {service['max_qty']} gacha bo'lishi kerak."
+        )
+        return
+
+    price = round(service["price_per_1000"] * quantity / 1000)
+    balance = db.get_balance(message.from_user.id)
+
+    if balance < price:
+        await state.clear()
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Balansni to'ldirish", callback_data="menu:topup", style="primary")]
+        ])
+        await message.answer(
+            f"❌ Balansingiz yetarli emas.\n\n"
+            f"Kerak: {price:,} so'm\n".replace(",", " ") +
+            f"Sizda: {balance:,} so'm".replace(",", " "),
+            reply_markup=kb
+        )
+        return
+
+    await state.update_data(quantity=quantity, price=price)
+    await state.set_state(SmmOrderState.confirming)
+
+    text = (
+        f"📦 {service['name']}\n"
+        f"🔗 {data['link']}\n"
+        f"🔢 Miqdor: {quantity}\n\n"
+        f"💵 Hisobingizdan <b>{price:,} so'm</b> yechib olinadi.\n".replace(",", " ") +
+        f"💰 Joriy balansingiz: {balance:,} so'm\n\n".replace(",", " ") +
+        "Tasdiqlaysizmi?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Ha, tasdiqlayman", callback_data="smmorderconfirm", style="success"),
+            InlineKeyboardButton(text="❌ Yo'q", callback_data=f"smmservice:{service['id']}", style="danger"),
+        ]
+    ])
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "smmorderconfirm", SmmOrderState.confirming)
+async def smm_order_confirmed(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    service = db.get_smm_service(data["service_id"])
+    link = data["link"]
+    quantity = data["quantity"]
+    price = data["price"]
+    await state.clear()
+
+    # Panelga buyurtma yuboramiz
+    result = smm_api.place_order(service["panel_service_id"], link, quantity)
+    panel_order_id = result.get("order") if isinstance(result, dict) else None
+
+    if not panel_order_id:
+        error_msg = result.get("error", "Noma'lum xatolik") if isinstance(result, dict) else "Noma'lum xatolik"
+        await callback.message.edit_text(
+            f"❌ Buyurtma yuborishda xatolik yuz berdi: {error_msg}\n\n"
+            "Balansingizdan pul yechilmadi. Iltimos, keyinroq qayta urinib ko'ring yoki admin bilan bog'laning."
+        )
+        await callback.answer()
+        return
+
+    db.add_balance(callback.from_user.id, -price)
+    order_id = db.log_order(
+        item_id=None, user_id=callback.from_user.id, price=price, promo_code=None,
+        order_type="smm", item_name=service["name"], link=link,
+        quantity=quantity, panel_order_id=panel_order_id
+    )
+
+    await callback.message.edit_text(
+        f"{tge('check', '✔️')} Buyurtma qabul qilindi!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n\n"
+        f"📦 {service['name']}\n"
+        f"🔗 {link}\n"
+        f"🔢 Miqdor: {quantity}\n"
+        f"💵 Narxi: {price:,} so'm\n".replace(",", " ") +
+        "\nBuyurtmangiz bajarilishi biroz vaqt olishi mumkin.\n"
+        "Holatini «🧾 Buyurtmalarim» bo'limidan kuzatib borishingiz mumkin."
+    )
+
+    user = callback.from_user
+    username_part = f"@{user.username}" if user.username else "username yo'q"
+    text = (
+        "📈 Yangi nakrutka buyurtmasi!\n\n"
+        f"🆔 Buyurtma raqami: #{order_id}\n\n"
+        f"👤 {user.full_name} ({username_part})\n"
+        f"🆔 Foydalanuvchi ID: {user.id}\n\n"
+        f"📦 {service['name']}\n"
+        f"🔗 {link}\n"
+        f"🔢 Miqdor: {quantity}\n"
+        f"💵 Narxi: {price:,} so'm\n".replace(",", " ") +
+        f"🆔 Panel buyurtma raqami: {panel_order_id}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Xpanel holatini tekshirish", callback_data=f"order_check_panel:{order_id}", style="primary")],
+        [InlineKeyboardButton(text="❌ Bekor qilish (pulni qaytarish)", callback_data=f"order_cancel:{order_id}", style="danger")],
+    ])
+    await notify_admin_text(bot, text, reply_markup=kb)
+    await callback.answer()
+
+
+# ---------- BUYURTMALARIM ----------
+STATUS_LABELS = {
+    "yangi": "🟡 Jarayonda",
+    "bajarildi": "🟢 Bajarildi",
+    "bekor qilindi": "🔴 Bekor qilindi",
+}
+ORDERS_PAGE_SIZE = 5
+
+
+def build_my_orders_content(user_id: int, page: int = 0):
+    orders = db.get_user_orders(user_id)
+
+    if not orders:
+        return "Sizda hozircha buyurtmalar yo'q.", None
+
+    start = page * ORDERS_PAGE_SIZE
+    chunk = orders[start:start + ORDERS_PAGE_SIZE]
+    total_pages = (len(orders) - 1) // ORDERS_PAGE_SIZE + 1
+
+    text = f"🧾 <b>Buyurtmalarim</b> ({page + 1}/{total_pages})\n\n"
+    for o in chunk:
+        status = STATUS_LABELS.get(o["status"], o["status"])
+        text += (
+            f"🆔 #{o['id']} — {o['item_name'] or ''}\n"
+            f"💵 {o['price']:,} so'm — {status}\n\n".replace(",", " ")
+        )
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="🔙 Orqaga", callback_data=f"myorders_page:{page - 1}", style="danger"))
+    if start + ORDERS_PAGE_SIZE < len(orders):
+        nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"myorders_page:{page + 1}", style="success"))
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[nav]) if nav else None
+    return text, kb
+
+
+@router.message(F.text == BTN_MY_ORDERS)
+async def my_orders_button(message: Message):
+    text, kb = build_my_orders_content(message.from_user.id, page=0)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "menu:myorders")
+async def my_orders(callback: CallbackQuery):
+    text, kb = build_my_orders_content(callback.from_user.id, page=0)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("myorders_page:"))
+async def my_orders_page_nav(callback: CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    text, kb = build_my_orders_content(callback.from_user.id, page=page)
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+# ---------- TEZKOR BUYRUQLAR (/pay, /orders, /admin, /top) ----------
+async def _require_ready(message: Message) -> bool:
+    """Bloklanmagan, telefoni tasdiqlangan va obunani o'tgan foydalanuvchimi - tekshiradi."""
+    if db.is_blocked(message.from_user.id):
+        await message.answer("⛔️ Siz botdan foydalanish huquqidan mahrum qilingansiz.")
+        return False
+    if not db.has_phone(message.from_user.id):
+        await message.answer(PHONE_REQUEST_TEXT, reply_markup=phone_request_kb())
+        return False
+    return True
+
+
+@router.message(Command("pay"))
+async def cmd_pay(message: Message, state: FSMContext):
+    if not await _require_ready(message):
+        return
+    await state.set_state(TopupState.waiting_amount)
+    text, kb = build_topup_content(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("orders"))
+async def cmd_orders(message: Message):
+    if not await _require_ready(message):
+        return
+    text, kb = build_my_orders_content(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("admin"))
+async def cmd_contact_admin(message: Message):
+    if not await _require_ready(message):
+        return
+    text, kb = build_contact_admin_content()
+    await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("top"))
+async def cmd_top(message: Message):
+    if not await _require_ready(message):
+        return
+    text, kb = build_top_offers_content()
+    await message.answer(text, reply_markup=kb)
+
+
+# ---------- MUROJAAT (admin bilan bot orqali yozishma) ----------
+@router.message(F.text == BTN_SUPPORT)
+async def support_button(message: Message, state: FSMContext):
+    await state.set_state(MurojaatState.waiting_message)
+    await message.answer("✉️ Xabaringizni yozing, adminga yetkazamiz:")
+
+
+@router.message(MurojaatState.waiting_message)
+async def support_message_received(message: Message, state: FSMContext, bot: Bot):
+    await state.clear()
+    user = message.from_user
+    username_part = f"@{user.username}" if user.username else "username yo'q"
+
+    text = (
+        "✉️ <b>Yangi murojaat!</b>\n\n"
+        f"👤 Foydalanuvchi: {user.full_name} ({username_part})\n"
+        f"🆔 ID: {user.id}\n\n"
+        f"💬 Xabar:\n{message.text or '(matn emas xabar)'}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Javob berish", callback_data=f"reply_user:{user.id}", style="primary")]
+    ])
+    await notify_admin_text(bot, text, reply_markup=kb)
+    await message.answer("✅ Xabaringiz adminga yuborildi. Tez orada javob beriladi.")
