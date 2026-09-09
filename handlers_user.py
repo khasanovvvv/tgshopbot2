@@ -436,7 +436,7 @@ async def build_services_screen():
     buttons.append([InlineKeyboardButton(text=items_label, callback_data="menu:items", style="primary")])
 
     if db.get_setting("top_offers_enabled") == "1":
-        buttons.append([InlineKeyboardButton(text=f"{tge('fire', '🔥')} Top takliflar", callback_data="menu:top", style="danger")])
+        buttons.append([InlineKeyboardButton(text="🔥 Top takliflar", callback_data="menu:top", style="danger")])
 
     return "🛍 Kerakli xizmatni tanlang:", InlineKeyboardMarkup(inline_keyboard=buttons)
 
