@@ -83,6 +83,10 @@ def init_db():
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("items_button_label", "⭐ Telegram xizmatlar")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
         ("channel_url", "https://t.me/your_channel")
     )
     default_emojis = {
