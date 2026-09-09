@@ -37,6 +37,11 @@ class AddCategory(StatesGroup):
     name = State()
 
 
+class ReplyToUser(StatesGroup):
+    user_id = State()
+    text = State()
+
+
 class AddItem(StatesGroup):
     category_id = State()
     name = State()
@@ -57,6 +62,7 @@ class RenameCategory(StatesGroup):
 class EditSettings(StatesGroup):
     admin_username = State()
     channel_url = State()
+    items_button_label = State()
 
 
 class EditEmoji(StatesGroup):
@@ -411,14 +417,42 @@ async def settings_menu(callback: CallbackQuery):
         return
     admin_username = db.get_setting("admin_username")
     channel_url = db.get_setting("channel_url")
-    text = f"⚙️ Sozlamalar:\n\nAdmin username: {admin_username}\nKanal link: {channel_url}"
+    items_label = db.get_setting("items_button_label") or "⭐ Telegram xizmatlar"
+    text = (
+        f"⚙️ Sozlamalar:\n\nAdmin username: {admin_username}\nKanal link: {channel_url}\n"
+        f"«Xizmatlar» ekranidagi tugma nomi: {items_label}"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Admin username", callback_data="admin:set_admin", style="success")],
         [InlineKeyboardButton(text="✏️ Kanal link", callback_data="admin:set_channel", style="success")],
+        [InlineKeyboardButton(text="✏️ Xizmatlar tugmasi nomi", callback_data="admin:set_items_label", style="success")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin:set_items_label")
+async def set_items_label_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(EditSettings.items_button_label)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:settings")]])
+    await callback.message.edit_text(
+        "«Xizmatlar» ekranidagi Premium tugmasi uchun yangi nom kiriting\n"
+        "(masalan: ⭐ Telegram xizmatlar):",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(EditSettings.items_button_label)
+async def set_items_label_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    db.set_setting("items_button_label", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Tugma nomi yangilandi.", reply_markup=admin_menu_kb())
 
 
 @router.callback_query(F.data == "admin:set_admin")
@@ -1873,3 +1907,38 @@ async def toggle_top_offers(callback: CallbackQuery):
     db.set_setting("top_offers_enabled", "0" if enabled else "1")
     await callback.answer("Holat yangilandi ✅")
     await top_settings_menu(callback)
+
+
+# ---------- MUROJAATGA JAVOB BERISH ----------
+@router.callback_query(F.data.startswith("reply_user:"))
+async def reply_user_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    user_id = int(callback.data.split(":")[1])
+    await state.update_data(reply_user_id=user_id)
+    await state.set_state(ReplyToUser.text)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:main")]
+    ])
+    await callback.message.answer(f"Foydalanuvchi (ID: {user_id}) ga javobingizni yozing:", reply_markup=kb)
+    await callback.answer()
+
+
+@router.message(ReplyToUser.text)
+async def reply_user_send(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    user_id = data["reply_user_id"]
+    await state.clear()
+
+    customer_bot = get_customer_bot()
+    try:
+        await customer_bot.send_message(
+            user_id,
+            f"✉️ <b>Admindan javob:</b>\n\n{message.text}"
+        )
+        await message.answer("✅ Javob yuborildi.", reply_markup=admin_menu_kb())
+    except Exception as e:
+        logging.getLogger("admin_notify").error(f"Javob yuborilmadi: {e}")
+        await message.answer(f"❌ Yuborilmadi: {e}", reply_markup=admin_menu_kb())
