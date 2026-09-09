@@ -4,6 +4,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 
 import database as db
 from config import ADMIN_ID
@@ -22,7 +23,8 @@ def admin_reply_kb() -> ReplyKeyboardMarkup:
 
 
 @router.message(CommandStart())
-async def admin_cmd_start(message: Message):
+async def admin_cmd_start(message: Message, state: FSMContext):
+    await state.clear()
     if not is_admin(message.from_user.id):
         await message.answer("⛔️ Bu bot faqat admin uchun.")
         return
@@ -33,7 +35,8 @@ async def admin_cmd_start(message: Message):
 
 
 @router.message(F.text == MENU_BUTTON_TEXT)
-async def open_admin_panel(message: Message):
+async def open_admin_panel(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await message.answer("🛠 Admin panel:", reply_markup=admin_menu_kb())
