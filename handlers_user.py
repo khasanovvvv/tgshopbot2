@@ -116,6 +116,14 @@ BTN_TOPUP = "💳 Hisobni to'ldirish"
 BTN_ADMIN = "👨‍💻 Admin"
 BTN_SUPPORT = "✉️ Murojaat"
 
+# Doimiy pastdagi tugmalarning matnlari to'plami. Har qanday joriy
+# jarayonda (FSM holatida) foydalanuvchi shulardan birini bossa, joriy
+# jarayon (masalan summani kiritish) NOTO'G'RI deb rad etilmasligi kerak -
+# aksincha, tugma o'zining ishini bajarishi kerak. Shuning uchun har bir
+# matn kiritish kutayotgan handler shu tugmalar UCHUN ISHLAMASLIGI kerak.
+MAIN_MENU_BUTTONS = {BTN_SERVICES, BTN_MY_ORDERS, BTN_BALANCE, BTN_TOPUP, BTN_ADMIN, BTN_SUPPORT}
+NOT_MENU_BUTTON = ~F.text.in_(MAIN_MENU_BUTTONS)
+
 
 def main_reply_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -285,7 +293,8 @@ def build_contact_admin_content():
 
 
 @router.message(F.text == BTN_ADMIN)
-async def contact_admin_button(message: Message):
+async def contact_admin_button(message: Message, state: FSMContext):
+    await state.clear()
     text, kb = build_contact_admin_content()
     await message.answer(text, reply_markup=kb)
 
@@ -320,7 +329,8 @@ async def topup_start(callback: CallbackQuery, state: FSMContext):
 
 # ---------- HISOBIM ----------
 @router.message(F.text == BTN_BALANCE)
-async def balance_button(message: Message):
+async def balance_button(message: Message, state: FSMContext):
+    await state.clear()
     balance = db.get_balance(message.from_user.id)
     order_count = len(db.get_user_orders(message.from_user.id))
     text = (
@@ -334,7 +344,7 @@ async def balance_button(message: Message):
     await message.answer(text, reply_markup=kb)
 
 
-@router.message(TopupState.waiting_amount)
+@router.message(TopupState.waiting_amount, NOT_MENU_BUTTON)
 async def topup_amount(message: Message, state: FSMContext):
     if not message.text or not message.text.strip().isdigit():
         await message.answer("❗️ Iltimos, faqat raqam kiriting.")
@@ -399,7 +409,7 @@ async def topup_receipt(message: Message, state: FSMContext, bot: Bot):
         await notify_admin_text(bot, caption + "\n\n⚠️ Chek rasmini yuklab bo'lmadi.", reply_markup=kb)
 
 
-@router.message(TopupState.waiting_receipt)
+@router.message(TopupState.waiting_receipt, NOT_MENU_BUTTON)
 async def topup_receipt_invalid(message: Message):
     await message.answer("❗️ Iltimos, to'lov chekini RASM shaklida yuboring.")
 
@@ -432,7 +442,8 @@ async def build_services_screen():
 
 
 @router.message(F.text == BTN_SERVICES)
-async def services_button(message: Message):
+async def services_button(message: Message, state: FSMContext):
+    await state.clear()
     text, kb = await build_services_screen()
     await message.answer(text, reply_markup=kb)
 
@@ -578,7 +589,7 @@ async def promo_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(PromoState.waiting_code)
+@router.message(PromoState.waiting_code, NOT_MENU_BUTTON)
 async def promo_check(message: Message, state: FSMContext):
     data = await state.get_data()
     item_id = data["item_id"]
@@ -849,7 +860,7 @@ async def smm_order_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(SmmOrderState.waiting_link)
+@router.message(SmmOrderState.waiting_link, NOT_MENU_BUTTON)
 async def smm_order_link(message: Message, state: FSMContext):
     await state.update_data(link=message.text.strip())
     data = await state.get_data()
@@ -861,7 +872,7 @@ async def smm_order_link(message: Message, state: FSMContext):
     )
 
 
-@router.message(SmmOrderState.waiting_quantity)
+@router.message(SmmOrderState.waiting_quantity, NOT_MENU_BUTTON)
 async def smm_order_quantity(message: Message, state: FSMContext):
     if not message.text.strip().isdigit():
         await message.answer("❗️ Iltimos, faqat raqam kiriting.")
@@ -1012,7 +1023,8 @@ def build_my_orders_content(user_id: int, page: int = 0):
 
 
 @router.message(F.text == BTN_MY_ORDERS)
-async def my_orders_button(message: Message):
+async def my_orders_button(message: Message, state: FSMContext):
+    await state.clear()
     text, kb = build_my_orders_content(message.from_user.id, page=0)
     await message.answer(text, reply_markup=kb)
 
@@ -1084,7 +1096,7 @@ async def support_button(message: Message, state: FSMContext):
     await message.answer("✉️ Xabaringizni yozing, adminga yetkazamiz:")
 
 
-@router.message(MurojaatState.waiting_message)
+@router.message(MurojaatState.waiting_message, NOT_MENU_BUTTON)
 async def support_message_received(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     user = message.from_user
