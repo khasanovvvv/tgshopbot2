@@ -118,7 +118,7 @@ class CurrencySettings(StatesGroup):
 
 class RequiredChannel(StatesGroup):
     username = State()
-    url = State()
+    button_text = State()
 
 
 # ---------- ADMIN ASOSIY MENYU ----------
@@ -1680,7 +1680,7 @@ async def required_channel_menu(callback: CallbackQuery):
         return
     enabled = db.get_setting("require_channel_enabled") == "1"
     username = db.get_setting("require_channel_username") or "-"
-    url = db.get_setting("require_channel_url") or "-"
+    button_text = db.get_setting("require_channel_button_text") or "📢 Kanalga o'tish"
 
     status_text = "✅ Yoqilgan" if enabled else "❌ O'chirilgan"
     toggle_text = "🔴 O'chirish" if enabled else "🟢 Yoqish"
@@ -1689,14 +1689,14 @@ async def required_channel_menu(callback: CallbackQuery):
         "🔒 <b>Majburiy obuna</b>\n\n"
         f"Holati: {status_text}\n"
         f"Kanal username: {username}\n"
-        f"Kanal link: {url}\n\n"
-        "⚠️ Yoqishdan oldin botni o'sha kanalga <b>admin</b> qilib qo'yganingizga ishonch hosil qiling, "
-        "aks holda obunani tekshira olmaydi."
+        f"Tugma matni: {button_text}\n\n"
+        "⚠️ Yoqishdan oldin mijozlar botini o'sha kanalga <b>admin</b> qilib qo'yganingizga "
+        "ishonch hosil qiling, aks holda obunani tekshira olmaydi."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=toggle_text, callback_data="admin:toggle_required_channel", style="danger" if enabled else "success")],
         [InlineKeyboardButton(text="✏️ Kanal username", callback_data="admin:set_req_channel_username")],
-        [InlineKeyboardButton(text="✏️ Kanal link", callback_data="admin:set_req_channel_url")],
+        [InlineKeyboardButton(text="✏️ Tugma matni", callback_data="admin:set_req_channel_url")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
@@ -1772,21 +1772,23 @@ async def set_req_channel_username_finish(message: Message, state: FSMContext):
 async def set_req_channel_url_start(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         return
-    await state.set_state(RequiredChannel.url)
+    await state.set_state(RequiredChannel.button_text)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:required_channel")]])
     await callback.message.edit_text(
-        "Kanalga o'tish uchun havolani kiriting (masalan: https://t.me/mychannel):", reply_markup=kb
+        "Obuna so'ralganda chiqadigan tugma uchun matn kiriting\n"
+        "(kanal nomi emas, xohlagan yozuv, masalan: 📢 Bizga qo'shiling):",
+        reply_markup=kb
     )
     await callback.answer()
 
 
-@router.message(RequiredChannel.url)
+@router.message(RequiredChannel.button_text)
 async def set_req_channel_url_finish(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    db.set_setting("require_channel_url", message.text.strip())
+    db.set_setting("require_channel_button_text", message.text.strip())
     await state.clear()
-    await message.answer("✅ Kanal link saqlandi.", reply_markup=admin_menu_kb())
+    await message.answer("✅ Tugma matni saqlandi.", reply_markup=admin_menu_kb())
 
 
 # ---------- BUYURTMANI TASDIQLASH / BEKOR QILISH / XPANEL HOLATI ----------
