@@ -194,9 +194,11 @@ async def is_subscribed(bot: Bot, user_id: int) -> bool:
 
 
 def subscribe_kb() -> InlineKeyboardMarkup:
-    channel_url = db.get_setting("require_channel_url") or "https://t.me"
+    channel = (db.get_setting("require_channel_username") or "").lstrip("@")
+    channel_url = f"https://t.me/{channel}" if channel else "https://t.me"
+    button_text = db.get_setting("require_channel_button_text") or "📢 Kanalga o'tish"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Kanalga o'tish", url=channel_url, style="primary")],
+        [InlineKeyboardButton(text=button_text, url=channel_url, style="primary")],
         [InlineKeyboardButton(text="✅ Tekshirdim", callback_data="check_subscription", style="success")],
     ])
 
