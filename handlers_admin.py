@@ -1732,9 +1732,40 @@ async def set_req_channel_username_start(callback: CallbackQuery, state: FSMCont
 async def set_req_channel_username_finish(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    db.set_setting("require_channel_username", message.text.strip())
+    channel = message.text.strip()
+    if not channel.startswith("@") and not channel.lstrip("-").isdigit():
+        channel = f"@{channel}"
+
     await state.clear()
-    await message.answer("✅ Kanal username saqlandi.", reply_markup=admin_menu_kb())
+
+    # Darhol tekshirib ko'ramiz - MIJOZLAR boti (obunani tekshiruvchi bot)
+    # shu kanalda ADMIN ekanligini. Shu orqali admin xatoni DARHOL ko'radi,
+    # "ishlamayapti" bo'lib qolmaydi.
+    customer_bot = get_customer_bot()
+    warning = ""
+    try:
+        me = await customer_bot.get_me()
+        bot_member = await customer_bot.get_chat_member(channel, me.id)
+        if bot_member.status not in ("administrator", "creator"):
+            warning = (
+                "\n\n⚠️ <b>Diqqat:</b> kanal topildi, lekin mijozlar boti "
+                f"(@{me.username}) unda ADMIN emas. Obunani tekshira olmaydi. "
+                "Kanal sozlamalaridan botni admin qilib qo'ying."
+            )
+    except Exception as e:
+        warning = (
+            f"\n\n❌ <b>Xatolik:</b> kanal topilmadi yoki mijozlar boti unga "
+            f"umuman a'zo emas ({e}).\n"
+            "Tekshiring:\n"
+            "1) Username to'g'ri yozilganini (masalan @mychannel)\n"
+            "2) Mijozlar botini shu kanalga <b>admin</b> qilib qo'yganingizni"
+        )
+
+    db.set_setting("require_channel_username", channel)
+    await message.answer(
+        f"✅ Kanal username saqlandi: {channel}{warning}",
+        reply_markup=admin_menu_kb()
+    )
 
 
 @router.callback_query(F.data == "admin:set_req_channel_url")
