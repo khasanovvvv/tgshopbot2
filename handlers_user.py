@@ -164,18 +164,33 @@ def phone_request_kb() -> ReplyKeyboardMarkup:
 
 
 # ---------- MAJBURIY OBUNA ----------
+_subscription_log = logging.getLogger("subscription")
+
+
 async def is_subscribed(bot: Bot, user_id: int) -> bool:
     enabled = db.get_setting("require_channel_enabled")
     if enabled != "1":
         return True
-    channel = db.get_setting("require_channel_username")
+    channel = (db.get_setting("require_channel_username") or "").strip()
     if not channel:
         return True
+
+    # Telegram API kanal identifikatorini "@username" yoki "-100..." raqamli
+    # ID shaklida talab qiladi. Admin @ belgisisiz kiritgan bo'lishi mumkin -
+    # buni avtomatik to'g'irlaymiz.
+    if not channel.startswith("@") and not channel.lstrip("-").isdigit():
+        channel = f"@{channel}"
+
     try:
         member = await bot.get_chat_member(channel, user_id)
         return member.status in ("member", "administrator", "creator")
-    except Exception:
-        return True  # bot admin emas yoki xato bo'lsa, botni bloklab qo'ymaymiz
+    except Exception as e:
+        # Xatoni albatta logga yozamiz - aks holda sozlama noto'g'ri
+        # bo'lsa ham hech narsa ko'rinmay, "ishlamayapti" bo'lib qoladi.
+        _subscription_log.error(
+            f"Obuna tekshiruvida xatolik (kanal: {channel}, user: {user_id}): {e}"
+        )
+        return True  # xato holatida botni butunlay bloklab qo'ymaymiz
 
 
 def subscribe_kb() -> InlineKeyboardMarkup:
