@@ -67,7 +67,7 @@ def init_db():
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
-        ("require_channel_url", "")
+        ("require_channel_button_text", "📢 Kanalga o'tish")
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
