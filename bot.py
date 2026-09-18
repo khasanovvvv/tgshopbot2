@@ -81,11 +81,21 @@ async def smm_status_checker():
                 if status == "completed":
                     db.set_order_status(order["id"], "bajarildi")
                     try:
+                        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        refill_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(
+                                text="♻️ Kafolat (refill) so'rash",
+                                callback_data=f"refill_request:{order['id']}"
+                            )
+                        ]])
                         await notifier.send_message(
                             order["user_id"],
                             f"✔️ Buyurtmangiz bajarildi!\n\n"
                             f"🆔 Buyurtma raqami: #{order['id']}\n"
-                            f"📦 {order['item_name'] or ''}"
+                            f"📦 {order['item_name'] or ''}\n\n"
+                            f"<i>Agar keyinchalik son kamayib qolsa, quyidagi tugma orqali "
+                            f"bepul to'ldirishni so'rashingiz mumkin.</i>",
+                            reply_markup=refill_kb
                         )
                     except Exception:
                         pass
