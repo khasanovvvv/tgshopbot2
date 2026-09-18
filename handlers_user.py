@@ -233,6 +233,7 @@ async def check_subscription_cb(callback: CallbackQuery, bot: Bot):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject, state: FSMContext, bot: Bot):
+    is_new_user = not db.get_user(message.from_user.id)
     db.add_user(message.from_user.id)
 
     if db.is_blocked(message.from_user.id):
@@ -241,6 +242,11 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
 
     if command.args:
         await state.update_data(pending_start=command.args)
+        # Referal orqali kirgan bo'lsa, DARHOL (faqat yangi foydalanuvchi uchun) belgilaymiz
+        if is_new_user and command.args.startswith("ref_"):
+            ref_id_str = command.args.replace("ref_", "")
+            if ref_id_str.isdigit():
+                db.set_referrer(message.from_user.id, int(ref_id_str))
 
     if not db.has_phone(message.from_user.id):
         await message.answer(PHONE_REQUEST_TEXT, reply_markup=phone_request_kb())
@@ -350,15 +356,55 @@ async def balance_button(message: Message, state: FSMContext):
     await state.clear()
     balance = db.get_balance(message.from_user.id)
     order_count = len(db.get_user_orders(message.from_user.id))
+    vip = db.get_vip_info(message.from_user.id)
+
     text = (
         "💰 <b>Hisobim</b>\n\n"
         f"Joriy balans: <b>{balance:,} so'm</b>\n".replace(",", " ") +
-        f"Jami buyurtmalar: {order_count} ta"
+        f"Jami buyurtmalar: {order_count} ta\n\n" +
+        f"Darajangiz: <b>{vip['tier']}</b>"
     )
+    if vip["discount"] > 0:
+        text += f" (barcha xizmatlarda {vip['discount']}% chegirma)"
+    text += f"\nJami xarid: {vip['total_spent']:,} so'm".replace(",", " ")
+    if vip["next_tier"]:
+        remaining = max(0, vip["next_threshold"] - vip["total_spent"])
+        text += (
+            f"\n\n{vip['next_tier']} darajasigacha yana {remaining:,} so'm xarid qiling."
+            .replace(",", " ")
+        )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Hisobni to'ldirish", callback_data="menu:topup", style="primary")]
+        [InlineKeyboardButton(text="💳 Hisobni to'ldirish", callback_data="menu:topup", style="primary")],
+        [InlineKeyboardButton(text="🎁 Do'stlarni taklif qilish", callback_data="menu:referral", style="success")],
     ])
     await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "menu:referral")
+async def referral_screen(callback: CallbackQuery, bot: Bot):
+    if db.get_setting("referral_enabled") != "1":
+        await callback.answer("Referal dasturi hozircha o'chirilgan.", show_alert=True)
+        return
+
+    me = await bot.get_me()
+    ref_link = f"https://t.me/{me.username}?start=ref_{callback.from_user.id}"
+    stats = db.get_referral_stats(callback.from_user.id)
+    bonus_percent = db.get_setting("referral_bonus_percent") or "5"
+
+    text = (
+        "🎁 <b>Do'stlarni taklif qilish</b>\n\n"
+        f"Har bir taklif qilgan do'stingiz balans to'ldirsa, sizga "
+        f"summaning <b>{bonus_percent}%</b> ulushi avtomatik tushadi!\n\n"
+        f"👥 Taklif qilganlaringiz: <b>{stats['invited']}</b> kishi\n"
+        f"💰 Jami ishlab topganingiz: <b>{stats['earnings']:,} so'm</b>\n\n".replace(",", " ") +
+        f"🔗 Sizning shaxsiy havolangiz:\n<code>{ref_link}</code>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↗️ Do'stlarga ulashish", url=f"https://t.me/share/url?url={ref_link}")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
 
 
 @router.message(TopupState.waiting_amount, NOT_MENU_BUTTON)
@@ -644,12 +690,20 @@ async def promo_check(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=kb)
 
 
+def apply_vip_discount(user_id: int, price: int) -> int:
+    vip = db.get_vip_info(user_id)
+    if vip["discount"] <= 0:
+        return price
+    return max(0, round(price * (1 - vip["discount"] / 100)))
+
+
 # ---------- BUYURTMA BERISH (ODDIY) ----------
 @router.callback_query(F.data.startswith("order:"))
 async def make_order(callback: CallbackQuery):
     item_id = int(callback.data.split(":")[1])
     item = db.get_item(item_id)
-    await show_order_confirmation(callback, item, item["price"], f"orderconfirm:{item_id}")
+    price = apply_vip_discount(callback.from_user.id, item["price"])
+    await show_order_confirmation(callback, item, price, f"orderconfirm:{item_id}")
 
 
 # ---------- BUYURTMA BERISH (PROMOKOD BILAN) ----------
@@ -660,6 +714,7 @@ async def make_order_promo(callback: CallbackQuery):
     item = db.get_item(item_id)
     promo = db.get_promocode(code)
     final_price = max(0, item["price"] - promo["discount"]) if promo else item["price"]
+    final_price = apply_vip_discount(callback.from_user.id, final_price)
     await show_order_confirmation(callback, item, final_price, f"orderpromoconfirm:{item_id}:{code}")
 
 
@@ -685,7 +740,8 @@ async def show_order_confirmation(callback: CallbackQuery, item, final_price: in
 async def make_order_confirmed(callback: CallbackQuery, bot: Bot):
     item_id = int(callback.data.split(":")[1])
     item = db.get_item(item_id)
-    await process_order(callback, bot, item, item["price"], None)
+    price = apply_vip_discount(callback.from_user.id, item["price"])
+    await process_order(callback, bot, item, price, None)
 
 
 @router.callback_query(F.data.startswith("orderpromoconfirm:"))
@@ -695,6 +751,7 @@ async def make_order_promo_confirmed(callback: CallbackQuery, bot: Bot):
     item = db.get_item(item_id)
     promo = db.get_promocode(code)
     final_price = max(0, item["price"] - promo["discount"]) if promo else item["price"]
+    final_price = apply_vip_discount(callback.from_user.id, final_price)
     await process_order(callback, bot, item, final_price, code)
 
 
@@ -906,6 +963,7 @@ async def smm_order_quantity(message: Message, state: FSMContext):
         return
 
     price = round(service["price_per_1000"] * quantity / 1000)
+    price = apply_vip_discount(message.from_user.id, price)
     balance = db.get_balance(message.from_user.id)
 
     if balance < price:
@@ -1130,3 +1188,41 @@ async def support_message_received(message: Message, state: FSMContext, bot: Bot
     ])
     await notify_admin_text(bot, text, reply_markup=kb)
     await message.answer("✅ Xabaringiz adminga yuborildi. Tez orada javob beriladi.")
+
+
+# ---------- REFILL (KAFOLAT) SO'ROVI ----------
+@router.callback_query(F.data.startswith("refill_request:"))
+async def refill_request(callback: CallbackQuery, bot: Bot):
+    order_id = int(callback.data.split(":")[1])
+    order = db.get_order(order_id)
+
+    if not order or order["user_id"] != callback.from_user.id:
+        await callback.answer("Buyurtma topilmadi.", show_alert=True)
+        return
+    if not order["panel_order_id"]:
+        await callback.answer("Bu buyurtma uchun kafolat mavjud emas.", show_alert=True)
+        return
+
+    await callback.answer("⏳ So'rov yuborilmoqda...")
+    result = smm_api.request_refill(order["panel_order_id"])
+
+    if isinstance(result, dict) and result.get("refill"):
+        await callback.message.answer(
+            f"♻️ Kafolat so'rovi qabul qilindi!\n\n"
+            f"🆔 Buyurtma: #{order_id}\n"
+            f"Son avtomatik to'ldiriladi, biroz vaqt olishi mumkin."
+        )
+        await notify_admin_text(
+            bot,
+            f"♻️ Kafolat (refill) so'rovi\n\n"
+            f"👤 {callback.from_user.full_name} (ID: {callback.from_user.id})\n"
+            f"🆔 Buyurtma: #{order_id}\n"
+            f"📦 {order['item_name'] or ''}"
+        )
+    else:
+        error = result.get("error", "noma'lum sabab") if isinstance(result, dict) else "noma'lum sabab"
+        await callback.message.answer(
+            f"❌ Kafolat so'rovini yuborib bo'lmadi: {error}\n\n"
+            "Bu xizmat kafolatsiz bo'lishi yoki kafolat muddati tugagan bo'lishi mumkin. "
+            "Savollar bo'lsa, «✉️ Murojaat» orqali yozing."
+        )
