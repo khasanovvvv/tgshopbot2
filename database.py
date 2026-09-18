@@ -87,6 +87,30 @@ def init_db():
     )
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("referral_enabled", "1")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("referral_bonus_percent", "5")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("vip_silver_threshold", "300000")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("vip_silver_discount", "5")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("vip_gold_threshold", "1000000")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+        ("vip_gold_discount", "10")
+    )
+    cur.execute(
+        "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
         ("channel_url", "https://t.me/your_channel")
     )
     default_emojis = {
@@ -113,6 +137,8 @@ def init_db():
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS balance INTEGER DEFAULT 0")
     cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked INTEGER DEFAULT 0")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings INTEGER DEFAULT 0")
 
     cur.execute(
         "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
@@ -322,6 +348,77 @@ def add_balance(user_id: int, amount: int) -> int:
     cur.close()
     release(conn)
     return row["balance"] if row else 0
+
+
+# ---------- REFERAL DASTURI ----------
+def set_referrer(user_id: int, referrer_id: int):
+    """Foydalanuvchini kimdir taklif qilganini belgilaydi (faqat bir marta, birinchi safar)."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET referred_by = %s WHERE user_id = %s AND referred_by IS NULL AND user_id != %s",
+        (referrer_id, user_id, referrer_id)
+    )
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
+def get_referral_stats(user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM users WHERE referred_by = %s", (user_id,))
+    invited = cur.fetchone()["c"]
+    cur.execute("SELECT referral_earnings FROM users WHERE user_id = %s", (user_id,))
+    row = cur.fetchone()
+    earnings = row["referral_earnings"] if row else 0
+    cur.close()
+    release(conn)
+    return {"invited": invited, "earnings": earnings}
+
+
+def add_referral_earning(user_id: int, amount: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET referral_earnings = referral_earnings + %s WHERE user_id = %s",
+        (amount, user_id)
+    )
+    conn.commit()
+    cur.close()
+    release(conn)
+
+
+# ---------- VIP DARAJALAR ----------
+def get_user_total_spent(user_id: int) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COALESCE(SUM(price), 0) AS s FROM orders WHERE user_id = %s AND status != 'bekor qilindi'",
+        (user_id,)
+    )
+    row = cur.fetchone()
+    cur.close()
+    release(conn)
+    return row["s"]
+
+
+def get_vip_info(user_id: int):
+    """Foydalanuvchining VIP darajasi va chegirma foizini qaytaradi."""
+    total_spent = get_user_total_spent(user_id)
+    gold_threshold = int(get_setting("vip_gold_threshold") or "1000000")
+    gold_discount = int(get_setting("vip_gold_discount") or "10")
+    silver_threshold = int(get_setting("vip_silver_threshold") or "300000")
+    silver_discount = int(get_setting("vip_silver_discount") or "5")
+
+    if total_spent >= gold_threshold:
+        return {"tier": "🥇 Gold", "discount": gold_discount, "total_spent": total_spent,
+                "next_threshold": None, "next_tier": None}
+    if total_spent >= silver_threshold:
+        return {"tier": "🥈 Silver", "discount": silver_discount, "total_spent": total_spent,
+                "next_threshold": gold_threshold, "next_tier": "🥇 Gold"}
+    return {"tier": "🥉 Bronza", "discount": 0, "total_spent": total_spent,
+            "next_threshold": silver_threshold, "next_tier": "🥈 Silver"}
 
 
 # ---------- BALANS TO'LDIRISH (TOPUP) ----------
