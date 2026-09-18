@@ -121,6 +121,17 @@ class RequiredChannel(StatesGroup):
     button_text = State()
 
 
+class ReferralSettings(StatesGroup):
+    percent = State()
+
+
+class VipSettings(StatesGroup):
+    silver_threshold = State()
+    silver_discount = State()
+    gold_threshold = State()
+    gold_discount = State()
+
+
 # ---------- ADMIN ASOSIY MENYU ----------
 def admin_menu_kb() -> InlineKeyboardMarkup:
     items = [
@@ -132,6 +143,8 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         ("💵 Kurs va ustama", "admin:currency_settings", "success"),
         ("💳 To'lov sozlamalari", "admin:payment_settings", "success"),
         ("🔒 Majburiy obuna", "admin:required_channel", "success"),
+        ("🎁 Referal dasturi", "admin:referral_settings", "success"),
+        ("👑 VIP darajalar", "admin:vip_settings", "success"),
         ("🎟 Promokodlar", "admin:promos", "success"),
         ("📢 Reklama yuborish", "admin:broadcast", "success"),
         ("📊 Statistika", "admin:stats", "success"),
@@ -752,9 +765,32 @@ async def topup_approve(callback: CallbackQuery, bot: Bot):
         new_balance = db.add_balance(topup["user_id"], topup["amount"])
         db.set_topup_status(topup_id, "approved")
 
+        # Referal bonusi: agar bu foydalanuvchini kimdir taklif qilgan bo'lsa,
+        # taklif qilgan kishiga summaning belgilangan foizi qo'shiladi.
+        referrer_bonus_text = ""
+        if db.get_setting("referral_enabled") == "1":
+            referred_user = db.get_user(topup["user_id"])
+            referrer_id = referred_user["referred_by"] if referred_user else None
+            if referrer_id:
+                percent = int(db.get_setting("referral_bonus_percent") or "5")
+                bonus = round(topup["amount"] * percent / 100)
+                if bonus > 0:
+                    db.add_balance(referrer_id, bonus)
+                    db.add_referral_earning(referrer_id, bonus)
+                    referrer_bonus_text = f"\n🎁 Referal bonusi ({percent}%): {bonus:,} so'm".replace(",", " ")
+                    customer_bot_for_ref = get_customer_bot()
+                    try:
+                        await customer_bot_for_ref.send_message(
+                            referrer_id,
+                            f"🎁 Sizning taklifingiz orqali kirgan foydalanuvchi balans to'ldirdi!\n\n"
+                            f"Sizga {bonus:,} so'm referal bonusi qo'shildi.".replace(",", " ")
+                        )
+                    except Exception:
+                        pass
+
         try:
             await callback.message.edit_caption(
-                caption=(callback.message.caption or "") + "\n\n✅ TASDIQLANDI",
+                caption=(callback.message.caption or "") + "\n\n✅ TASDIQLANDI" + referrer_bonus_text,
                 reply_markup=None
             )
         except Exception:
@@ -1975,3 +2011,126 @@ async def reply_user_send(message: Message, state: FSMContext):
     except Exception as e:
         logging.getLogger("admin_notify").error(f"Javob yuborilmadi: {e}")
         await message.answer(f"❌ Yuborilmadi: {e}", reply_markup=admin_menu_kb())
+
+
+# ---------- REFERAL DASTURI SOZLAMALARI ----------
+@router.callback_query(F.data == "admin:referral_settings")
+async def referral_settings_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    enabled = db.get_setting("referral_enabled") == "1"
+    percent = db.get_setting("referral_bonus_percent") or "5"
+    status_text = "✅ Yoqilgan" if enabled else "❌ O'chirilgan"
+    toggle_text = "🔴 O'chirish" if enabled else "🟢 Yoqish"
+
+    text = (
+        "🎁 <b>Referal dasturi</b>\n\n"
+        f"Holati: {status_text}\n"
+        f"Bonus foizi: {percent}%\n\n"
+        "Foydalanuvchi o'z havolasi orqali do'stini taklif qiladi. "
+        "Do'sti balans to'ldirganda, taklif qilgan kishiga summaning shu foizi avtomatik tushadi."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data="admin:toggle_referral", style="danger" if enabled else "success")],
+        [InlineKeyboardButton(text="✏️ Bonus foizi", callback_data="admin:set_ref_percent")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:toggle_referral")
+async def toggle_referral(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    enabled = db.get_setting("referral_enabled") == "1"
+    db.set_setting("referral_enabled", "0" if enabled else "1")
+    await callback.answer("Holat yangilandi ✅")
+    await referral_settings_menu(callback)
+
+
+@router.callback_query(F.data == "admin:set_ref_percent")
+async def set_ref_percent_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.set_state(ReferralSettings.percent)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:referral_settings")]])
+    await callback.message.edit_text("Referal bonus foizini kiriting (masalan: 5):", reply_markup=kb)
+    await callback.answer()
+
+
+@router.message(ReferralSettings.percent)
+async def set_ref_percent_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    db.set_setting("referral_bonus_percent", message.text.strip())
+    await state.clear()
+    await message.answer("✅ Referal bonus foizi yangilandi.", reply_markup=admin_menu_kb())
+
+
+# ---------- VIP DARAJALAR SOZLAMALARI ----------
+@router.callback_query(F.data == "admin:vip_settings")
+async def vip_settings_menu(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    st = int(db.get_setting("vip_silver_threshold") or "300000")
+    sd = db.get_setting("vip_silver_discount") or "5"
+    gt = int(db.get_setting("vip_gold_threshold") or "1000000")
+    gd = db.get_setting("vip_gold_discount") or "10"
+
+    text = (
+        "👑 <b>VIP darajalar</b>\n\n"
+        "Mijozning jami xarid summasiga qarab avtomatik daraja beriladi va "
+        "barcha xizmatlarda doimiy chegirma qo'llanadi.\n\n"
+        f"🥉 Bronza — boshlang'ich, chegirmasiz\n"
+        f"🥈 Silver — {st:,} so'mdan, {sd}% chegirma\n".replace(",", " ") +
+        f"🥇 Gold — {gt:,} so'mdan, {gd}% chegirma".replace(",", " ")
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Silver summasi", callback_data="admin:set_vip_st")],
+        [InlineKeyboardButton(text="✏️ Silver chegirmasi", callback_data="admin:set_vip_sd")],
+        [InlineKeyboardButton(text="✏️ Gold summasi", callback_data="admin:set_vip_gt")],
+        [InlineKeyboardButton(text="✏️ Gold chegirmasi", callback_data="admin:set_vip_gd")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+VIP_FIELDS = {
+    "admin:set_vip_st": ("vip_silver_threshold", VipSettings.silver_threshold, "Silver darajasi uchun jami xarid summasini kiriting (so'mda):"),
+    "admin:set_vip_sd": ("vip_silver_discount", VipSettings.silver_discount, "Silver darajasi uchun chegirma foizini kiriting:"),
+    "admin:set_vip_gt": ("vip_gold_threshold", VipSettings.gold_threshold, "Gold darajasi uchun jami xarid summasini kiriting (so'mda):"),
+    "admin:set_vip_gd": ("vip_gold_discount", VipSettings.gold_discount, "Gold darajasi uchun chegirma foizini kiriting:"),
+}
+
+
+@router.callback_query(F.data.in_(list(VIP_FIELDS.keys())))
+async def set_vip_field_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    setting_key, fsm_state, prompt = VIP_FIELDS[callback.data]
+    await state.update_data(vip_setting_key=setting_key)
+    await state.set_state(fsm_state)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin:vip_settings")]])
+    await callback.message.edit_text(prompt, reply_markup=kb)
+    await callback.answer()
+
+
+@router.message(VipSettings.silver_threshold)
+@router.message(VipSettings.silver_discount)
+@router.message(VipSettings.gold_threshold)
+@router.message(VipSettings.gold_discount)
+async def set_vip_field_finish(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    if not message.text.strip().isdigit():
+        await message.answer("❗️ Iltimos, faqat raqam kiriting.")
+        return
+    data = await state.get_data()
+    db.set_setting(data["vip_setting_key"], message.text.strip())
+    await state.clear()
+    await message.answer("✅ Sozlama yangilandi.", reply_markup=admin_menu_kb())
