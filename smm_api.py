@@ -37,3 +37,13 @@ def place_order(service_id: int, link: str, quantity: int):
 def get_order_status(order_id: int):
     """Buyurtma holatini (qancha bajarilgani) qaytaradi."""
     return _call({"action": "status", "order": order_id})
+
+
+def request_refill(order_id: int):
+    """Buyurtma uchun refill (to'ldirish) so'rovi yuboradi - agar
+    obunachi/layk soni tushib qolsa, panel avtomatik to'ldirib beradi."""
+    return _call({"action": "refill", "order": order_id})
+
+
+def get_refill_status(refill_id: int):
+    return _call({"action": "refill_status", "refill": refill_id})
